@@ -140,8 +140,9 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ## [À venir] — non planifié
 
-- Seuil OCR configurable par action (stocké dans le JSON de session)
+- Seuil OCR configurable par action individuelle (stocké dans le JSON de session)
 - Mode `--dry-run` : vérification OCR sans exécution des actions
 - Chiffrement AES des sessions sensibles
 - Backend alternatif Playwright pour les applications web
-- Export CSV du rapport
+- Alertes automatiques (email / webhook) si le temps de réponse dépasse un seuil
+- Comparaison côte-à-côte de deux sessions (régression de performance)
