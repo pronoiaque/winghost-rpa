@@ -1,7 +1,14 @@
 """
 gui.py — Interface Tkinter pour enregistrer et rejouer des sessions.
 
-Fonctionnalités :
+v2 :
+  • Colonne « Cible » dans le rapport Treeview (label OCR humain)
+  • Colonne « Cible » affichée dans le journal temps réel
+  • Bouton « Exporter HTML » avec graphique SVG des temps de réponse
+  • Support multi-moniteurs : détection du nombre d'écrans + info dans la barre de statut
+  • Fenêtre initiale centrée sur le moniteur principal
+
+Fonctionnalités v1 conservées :
   • Bouton RECORD  : démarre/arrête l'enregistreur (recorder.py)
   • Sélection de session + bouton REPLAY
   • Arrêt anticipé du replay
@@ -15,15 +22,17 @@ import threading
 import json
 import time
 import datetime
+import subprocess
+import sys
 from pathlib import Path
-import importlib.util, sys
 
 # Imports locaux
 try:
-    from recorder import ActionRecorder
+    from recorder import ActionRecorder, get_all_monitors
     from replayer import ActionReplayer, ActionResult, SESSIONS_DIR, REPORTS_DIR
 except ImportError as e:
-    messagebox.showerror("Import manquant", str(e))
+    import tkinter.messagebox as _mb
+    _mb.showerror("Import manquant", str(e))
     sys.exit(1)
 
 # ─── Palette & constantes ─────────────────────────────────────────────────────
@@ -43,24 +52,51 @@ FONT_UI   = ("Segoe UI", 10)
 FONT_H1   = ("Segoe UI Semibold", 13)
 FONT_H2   = ("Segoe UI", 11)
 
+
+# ─── Utilitaire multi-moniteurs ───────────────────────────────────────────────
+
+def center_window_on_primary(win: tk.Tk, w: int = 940, h: int = 660):
+    """Centre la fenêtre sur le moniteur principal."""
+    monitors = get_all_monitors()
+    primary = monitors[0]
+    x = primary["left"] + (primary["width"]  - w) // 2
+    y = primary["top"]  + (primary["height"] - h) // 2
+    win.geometry(f"{w}x{h}+{x}+{y}")
+
+
+def monitor_summary() -> str:
+    """Retourne un résumé textuel des moniteurs détectés."""
+    monitors = get_all_monitors()
+    if len(monitors) == 1:
+        m = monitors[0]
+        return f"1 écran  {m['width']}×{m['height']}"
+    parts = [f"{m['width']}×{m['height']}" for m in monitors]
+    return f"{len(monitors)} écrans  " + "  +  ".join(parts)
+
+
 # ─── Application principale ───────────────────────────────────────────────────
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("RPA Recorder / Replayer")
+        self.title("WinGhost RPA v2")
         self.configure(bg=BG)
         self.resizable(True, True)
         self.minsize(860, 640)
+        center_window_on_primary(self)
 
         self._recorder: ActionRecorder | None = None
         self._replayer: ActionReplayer | None = None
         self._session_path: Path | None = None
         self._replay_thread: threading.Thread | None = None
         self._results: list[ActionResult] = []
+        self._report_json_path: Path | None = None
+        self._report_html_path: Path | None = None
 
         self._build_ui()
         self._refresh_session_list()
+        # Affichage moniteurs dans la barre de statut
+        self.after(200, self._update_monitor_status)
 
     # ── Construction de l'interface ───────────────────────────────────────────
 
@@ -68,12 +104,17 @@ class App(tk.Tk):
         # ── En-tête ──────────────────────────────────────────────────────────
         header = tk.Frame(self, bg=BG, pady=10)
         header.pack(fill="x", padx=20)
-        tk.Label(header, text="RPA Recorder / Replayer",
+        tk.Label(header, text="WinGhost RPA v2",
                  font=FONT_H1, bg=BG, fg=FG).pack(side="left")
 
         self._status_var = tk.StringVar(value="Prêt")
         tk.Label(header, textvariable=self._status_var,
                  font=FONT_UI, bg=BG, fg=FG2).pack(side="right", padx=10)
+
+        # Indicateur multi-moniteurs
+        self._monitor_var = tk.StringVar(value="")
+        tk.Label(header, textvariable=self._monitor_var,
+                 font=("Segoe UI", 9), bg=BG, fg=FG2).pack(side="right", padx=(0, 16))
 
         sep = tk.Frame(self, bg=BG3, height=1)
         sep.pack(fill="x", padx=20)
@@ -119,7 +160,6 @@ class App(tk.Tk):
                                    bd=1, relief="flat", padx=10, pady=10)
         sess_frame.pack(fill="both", expand=True, pady=(0, 12))
 
-        # Listbox sessions
         sb = tk.Scrollbar(sess_frame)
         sb.pack(side="right", fill="y")
 
@@ -133,7 +173,6 @@ class App(tk.Tk):
         sb.config(command=self._session_listbox.yview)
         self._session_listbox.bind("<<ListboxSelect>>", self._on_session_select)
 
-        # Boutons sous la liste
         btns = tk.Frame(sess_frame, bg=BG2)
         btns.pack(fill="x", pady=(6, 0))
 
@@ -244,6 +283,7 @@ class App(tk.Tk):
         self._log_text.tag_configure("info",     foreground=FG2)
         self._log_text.tag_configure("heading",  foreground=ACCENT,
                                      font=("Consolas", 9, "bold"))
+        self._log_text.tag_configure("label",    foreground=ACCENT2)
 
         # Onglet Rapport
         report_tab = tk.Frame(self._notebook, bg=BG2)
@@ -251,8 +291,8 @@ class App(tk.Tk):
         self._build_report_tab(report_tab)
 
     def _build_report_tab(self, parent):
-        # Tableau des résultats
-        cols = ("#", "Type", "OCR Score", "Visuel OK", "Réponse (s)", "Statut")
+        # v2 : colonne « Cible » ajoutée
+        cols = ("#", "Type", "Cible", "OCR Score", "Visuel OK", "Réponse (s)", "Statut")
         tree_frame = tk.Frame(parent, bg=BG2)
         tree_frame.pack(fill="both", expand=True, padx=4, pady=4)
 
@@ -278,12 +318,13 @@ class App(tk.Tk):
         )
         for col in cols:
             self._tree.heading(col, text=col)
-        self._tree.column("#",          width=40,  stretch=False)
-        self._tree.column("Type",       width=110, stretch=False)
-        self._tree.column("OCR Score",  width=80,  stretch=False)
-        self._tree.column("Visuel OK",  width=75,  stretch=False)
-        self._tree.column("Réponse (s)",width=90,  stretch=False)
-        self._tree.column("Statut",     width=200, stretch=True)
+        self._tree.column("#",           width=40,  stretch=False)
+        self._tree.column("Type",        width=100, stretch=False)
+        self._tree.column("Cible",       width=180, stretch=True)   # v2
+        self._tree.column("OCR Score",   width=75,  stretch=False)
+        self._tree.column("Visuel OK",   width=70,  stretch=False)
+        self._tree.column("Réponse (s)", width=90,  stretch=False)
+        self._tree.column("Statut",      width=160, stretch=True)
 
         tree_scroll.config(command=self._tree.yview)
         self._tree.pack(fill="both", expand=True)
@@ -297,19 +338,39 @@ class App(tk.Tk):
         )
         self._summary_lbl.pack(side="left")
 
+        # ── Boutons export ────────────────────────────────────────────────────
         tk.Button(
-            footer, text="Exporter JSON",
-            command=self._export_report,
-            bg=BG3, fg=FG2, font=FONT_UI,
-            relief="flat", padx=8, pady=3, cursor="hand2",
-        ).pack(side="right", padx=(4, 0))
-
-        tk.Button(
-            footer, text="Ouvrir dossier rapports",
+            footer, text="📂 Dossier rapports",
             command=lambda: self._open_folder(REPORTS_DIR),
             bg=BG3, fg=FG2, font=FONT_UI,
             relief="flat", padx=8, pady=3, cursor="hand2",
         ).pack(side="right")
+
+        tk.Button(
+            footer, text="Exporter JSON",
+            command=self._export_report_json,
+            bg=BG3, fg=FG2, font=FONT_UI,
+            relief="flat", padx=8, pady=3, cursor="hand2",
+        ).pack(side="right", padx=(0, 4))
+
+        # v2 : bouton export HTML
+        self._html_btn = tk.Button(
+            footer, text="🌐 Exporter HTML",
+            command=self._export_report_html,
+            bg=ACCENT, fg=BG, font=("Segoe UI Semibold", 10),
+            relief="flat", padx=8, pady=3, cursor="hand2",
+        )
+        self._html_btn.pack(side="right", padx=(0, 4))
+
+    # ── Multi-moniteurs ───────────────────────────────────────────────────────
+
+    def _update_monitor_status(self):
+        """Met à jour l'indicateur écrans dans le header."""
+        try:
+            txt = monitor_summary()
+            self._monitor_var.set(f"🖥  {txt}")
+        except Exception:
+            pass
 
     # ── Sessions ──────────────────────────────────────────────────────────────
 
@@ -346,7 +407,6 @@ class App(tk.Tk):
 
     def _toggle_record(self):
         if self._recorder is None:
-            # Démarrage
             self._recorder = ActionRecorder(
                 save_screenshots=self._screenshots_var.get()
             )
@@ -356,7 +416,6 @@ class App(tk.Tk):
             self._status_var.set("⬤ Enregistrement en cours…")
             self._log("⬤ Enregistrement démarré.", "heading")
         else:
-            # Arrêt
             path = self._recorder.stop()
             self._recorder = None
             self._rec_btn.config(text="  ⬤  RECORD", bg=GREEN)
@@ -374,13 +433,15 @@ class App(tk.Tk):
             return
 
         self._results.clear()
+        self._report_json_path = None
+        self._report_html_path = None
         self._clear_tree()
         self._log(f"▶ Début du replay : {self._session_path.name}", "heading")
         self._replay_btn.config(state="disabled")
         self._stop_btn.config(state="normal")
         self._progress_var.set(0)
         self._status_var.set("Replay en cours…")
-        self._notebook.select(0)  # Affiche le journal
+        self._notebook.select(0)
 
         self._replayer = ActionReplayer(
             ocr_similarity_min=self._ocr_threshold_var.get(),
@@ -388,8 +449,7 @@ class App(tk.Tk):
         )
 
         session = self._replayer.load_session(self._session_path)
-        total   = len(session.get("actions", []))
-        self._total_actions = total
+        self._total_actions = len(session.get("actions", []))
 
         self._replay_thread = threading.Thread(
             target=self._run_replay,
@@ -402,8 +462,10 @@ class App(tk.Tk):
         try:
             results = self._replayer.replay(session)
             self._results = results
-            report_path = self._replayer.save_report(self._session_path)
-            self.after(0, self._on_replay_done, results, report_path)
+            json_path = self._replayer.save_report(self._session_path)
+            # Le HTML a été généré en même temps par save_report()
+            html_path = Path(str(json_path).replace(".json", ".html"))
+            self.after(0, self._on_replay_done, results, json_path, html_path)
         except Exception as e:
             self.after(0, self._log, f"ERREUR replay : {e}", "error")
             self.after(0, self._on_replay_finished)
@@ -414,13 +476,14 @@ class App(tk.Tk):
         self._log("■ Replay interrompu par l'utilisateur.", "warn")
 
     def _on_action_progress(self, current: int, total: int, result: ActionResult):
-        """Appelé depuis le thread replay — doit passer par after()."""
         self.after(0, self._update_progress, current, total, result)
 
     def _update_progress(self, current: int, total: int, result: ActionResult):
         pct = (current / total * 100) if total > 0 else 0
         self._progress_var.set(pct)
         self._progress_lbl.config(text=f"{current} / {total}")
+
+        label = result.label or ""
 
         if result.skipped:
             tag = "warn"
@@ -433,17 +496,25 @@ class App(tk.Tk):
             rt   = f"{result.response_time:.3f}s" if result.response_time is not None else "—"
             status = f"OK  ⏱ {rt}"
 
-        msg = (f"[{result.index:>3}] {result.action_type:<14}  "
-               f"OCR={result.ocr_match:.2f if result.ocr_match is not None else '—':>5}  "
-               f"{status}")
+        # v2 : label affiché dans le journal
+        label_part = f"  [{label}]" if label else ""
+        msg = (f"[{result.index:>3}] {result.action_type:<14}"
+               f"{label_part:<22}"
+               f"  OCR={result.ocr_match:.2f if result.ocr_match is not None else '—':>5}"
+               f"  {status}")
         self._log(msg, tag)
         self._add_tree_row(result)
 
-    def _on_replay_done(self, results: list[ActionResult], report_path: Path):
+    def _on_replay_done(self, results: list[ActionResult],
+                        json_path: Path, html_path: Path):
+        self._report_json_path = json_path
+        self._report_html_path = html_path if html_path.exists() else None
         self._on_replay_finished()
-        self._log(f"✔ Replay terminé. Rapport : {report_path.name}", "ok")
+        self._log(f"✔ Replay terminé. JSON: {json_path.name}", "ok")
+        if self._report_html_path:
+            self._log(f"   HTML: {html_path.name}", "ok")
         self._status_var.set("Replay terminé.")
-        self._notebook.select(1)  # Bascule sur l'onglet Rapport
+        self._notebook.select(1)
         self._update_summary(results)
 
     def _on_replay_finished(self):
@@ -457,17 +528,19 @@ class App(tk.Tk):
         ocr_score = f"{r.ocr_match:.2f}" if r.ocr_match is not None else "—"
         visual_ok = "✔" if r.visual_ok else ("✘" if r.visual_ok is False else "—")
         resp      = f"{r.response_time:.3f}" if r.response_time is not None else "—"
+        label     = r.label or "—"
 
         if r.skipped:
-            tag, status = "warn", f"IGNORÉ"
+            tag, status = "warn", "IGNORÉ"
         elif r.error:
-            tag, status = "error", r.error[:60]
+            tag, status = "error", r.error[:50]
         else:
             tag, status = "ok", "OK"
 
         iid = self._tree.insert(
             "", "end",
-            values=(r.index, r.action_type, ocr_score, visual_ok, resp, status),
+            values=(r.index, r.action_type, label,
+                    ocr_score, visual_ok, resp, status),
         )
         self._tree.tag_configure("ok",    foreground=GREEN)
         self._tree.tag_configure("warn",  foreground=YELLOW)
@@ -493,12 +566,12 @@ class App(tk.Tk):
                  f"   ⏱ Avg {avg_t}  Max {max_t}"
         )
 
-    def _export_report(self):
+    def _export_report_json(self):
         if not self._results:
             messagebox.showinfo("Rapport vide", "Aucun résultat disponible.")
             return
         path = filedialog.asksaveasfilename(
-            title="Exporter le rapport",
+            title="Exporter le rapport JSON",
             initialdir=REPORTS_DIR,
             defaultextension=".json",
             filetypes=[("JSON", "*.json")],
@@ -507,7 +580,71 @@ class App(tk.Tk):
             data = [r.to_dict() for r in self._results]
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            self._log(f"Rapport exporté → {path}", "ok")
+            self._log(f"Rapport JSON exporté → {path}", "ok")
+
+    def _export_report_html(self):
+        """v2 : exporte le rapport HTML avec graphique SVG et l'ouvre dans le navigateur."""
+        if not self._results:
+            messagebox.showinfo("Rapport vide", "Aucun résultat disponible.")
+            return
+
+        # Si on a déjà un rapport HTML généré, on propose de l'ouvrir directement
+        if self._report_html_path and self._report_html_path.exists():
+            answer = messagebox.askyesnocancel(
+                "Rapport HTML",
+                f"Un rapport HTML a déjà été généré :\n{self._report_html_path.name}\n\n"
+                "Ouvrir ce fichier ?  (Non = en générer un nouveau)"
+            )
+            if answer is None:
+                return
+            if answer:
+                self._open_html(self._report_html_path)
+                return
+
+        # Génère un nouveau fichier
+        path = filedialog.asksaveasfilename(
+            title="Exporter le rapport HTML",
+            initialdir=REPORTS_DIR,
+            defaultextension=".html",
+            filetypes=[("HTML", "*.html")],
+        )
+        if not path:
+            return
+
+        html_path = Path(path)
+        try:
+            html_content = self._replayer.save_report_html(
+                self._session_path or Path("session_unknown.json")
+            )
+            # save_report_html retourne le path, le contenu est déjà écrit
+            # Mais on veut écrire à l'emplacement choisi par l'utilisateur
+            html_content_str = self._replayer._build_html_report(
+                {
+                    "session_file": str(self._session_path),
+                    "replayed_at":  datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+                    "summary": self._make_summary_dict(),
+                    "actions": [r.to_dict() for r in self._results],
+                },
+                (self._session_path.stem if self._session_path else "session"),
+                datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+            )
+            html_path.write_text(html_content_str, encoding="utf-8")
+            self._log(f"Rapport HTML exporté → {html_path}", "ok")
+            self._open_html(html_path)
+        except Exception as e:
+            messagebox.showerror("Erreur HTML", str(e))
+
+    def _make_summary_dict(self) -> dict:
+        results = self._results
+        times = [r.response_time for r in results if r.response_time is not None]
+        return {
+            "total":   len(results),
+            "ok":      sum(1 for r in results if not r.skipped and not r.error),
+            "skipped": sum(1 for r in results if r.skipped),
+            "errors":  sum(1 for r in results if r.error),
+            "avg_response_time_s": round(sum(times)/len(times), 3) if times else None,
+            "max_response_time_s": round(max(times), 3) if times else None,
+        }
 
     # ── Journal ───────────────────────────────────────────────────────────────
 
@@ -523,7 +660,7 @@ class App(tk.Tk):
 
     @staticmethod
     def _open_folder(path: Path):
-        import os, subprocess
+        import os
         if sys.platform == "win32":
             os.startfile(str(path))
         elif sys.platform == "darwin":
@@ -531,9 +668,19 @@ class App(tk.Tk):
         else:
             subprocess.Popen(["xdg-open", str(path)])
 
+    @staticmethod
+    def _open_html(path: Path):
+        """Ouvre le rapport HTML dans le navigateur par défaut."""
+        import webbrowser
+        webbrowser.open(path.as_uri())
+
 
 # ─── Lancement ────────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+def main():
     app = App()
     app.mainloop()
+
+
+if __name__ == "__main__":
+    main()

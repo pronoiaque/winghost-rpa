@@ -12,6 +12,9 @@ easyocr>=1.7.1
 Pillow>=10.0.0
 numpy>=1.24.0
 
+# Multi-moniteurs (optionnel — repli gracieux si absent)
+screeninfo>=0.8.1
+
 # (optionnel) accélération GPU pour EasyOCR
 # torch>=2.0.0        # décommenter si GPU CUDA disponible
 # torchvision>=0.15.0

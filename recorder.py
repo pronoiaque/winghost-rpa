@@ -2,6 +2,9 @@
 recorder.py — Enregistrement des actions utilisateur (clics + saisies)
 avec capture visuelle de la zone cible via EasyOCR.
 
+v2 : ajout du champ `label` (nom humain de la cible déduit de l'OCR)
+     + support multi-moniteurs (capture sur l'écran contenant le curseur)
+
 Sortie : session_YYYYMMDD_HHMMSS.json
 """
 
@@ -29,6 +32,7 @@ SESSIONS_DIR.mkdir(exist_ok=True)
 SCREENSHOT_PADDING = 80          # px autour du clic pour la capture visuelle
 OCR_LANGUAGES      = ["fr", "en"]
 DOUBLE_CLICK_GAP   = 0.3         # secondes max entre deux clics pour détecter un double-clic
+LABEL_MAX_WORDS    = 4           # nombre max de mots dans un label auto-généré
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,14 +40,111 @@ logging.basicConfig(
 )
 log = logging.getLogger("recorder")
 
+# ─── Multi-moniteurs ─────────────────────────────────────────────────────────
+
+def get_all_monitors() -> list[dict]:
+    """
+    Retourne la liste des moniteurs {left, top, width, height}.
+    Utilise screeninfo si disponible, sinon repli sur le moniteur principal pyautogui.
+    """
+    try:
+        from screeninfo import get_monitors
+        return [
+            {"left": m.x, "top": m.y, "width": m.width, "height": m.height}
+            for m in get_monitors()
+        ]
+    except Exception:
+        w, h = pyautogui.size()
+        return [{"left": 0, "top": 0, "width": w, "height": h}]
+
+
+def monitor_for_point(x: int, y: int) -> dict:
+    """Retourne le moniteur contenant le point (x, y)."""
+    monitors = get_all_monitors()
+    for m in monitors:
+        if m["left"] <= x < m["left"] + m["width"] and \
+           m["top"]  <= y < m["top"]  + m["height"]:
+            return m
+    # Repli : premier moniteur
+    return monitors[0]
+
+
+def screenshot_region(x: int, y: int, padding: int = SCREENSHOT_PADDING):
+    """
+    Capture une région carrée autour de (x, y) clampée aux limites
+    du moniteur qui contient ce point.
+    """
+    mon = monitor_for_point(x, y)
+    ml, mt, mw, mh = mon["left"], mon["top"], mon["width"], mon["height"]
+
+    rx = max(ml, x - padding)
+    ry = max(mt, y - padding)
+    rr = min(ml + mw, x + padding)
+    rb = min(mt + mh, y + padding)
+    rw = rr - rx
+    rh = rb - ry
+
+    try:
+        img = pyautogui.screenshot(region=(rx, ry, rw, rh))
+    except Exception:
+        # Certaines versions de pyautogui/Pillow ne gèrent pas les coords négatives
+        img = pyautogui.screenshot()
+        img = img.crop((rx - ml, ry - mt, rr - ml, rb - mt))
+
+    return img, [rx, ry, rw, rh]
+
+
+# ─── Génération du label humain ───────────────────────────────────────────────
+
+def derive_label(ocr_text: str, action_type: str) -> str:
+    """
+    Déduit un label lisible depuis le texte OCR brut.
+
+    Stratégie :
+    1. Nettoie les séparateurs « | »
+    2. Prend le fragment le plus court (probablement le bouton / l'étiquette)
+       de longueur ≥ 2 caractères
+    3. Limite à LABEL_MAX_WORDS mots
+    4. Si rien, retourne un fallback selon le type d'action
+    """
+    if not ocr_text or not ocr_text.strip():
+        fallbacks = {
+            "click":        "Clic",
+            "double_click": "Double-clic",
+            "right_click":  "Clic droit",
+            "type":         "Saisie",
+            "key":          "Touche",
+        }
+        return fallbacks.get(action_type, "Action")
+
+    # Séparer sur " | "
+    fragments = [f.strip() for f in ocr_text.split("|") if f.strip()]
+
+    if not fragments:
+        return ocr_text[:40].strip()
+
+    # Choisir le fragment le plus court qui a au moins 2 caractères
+    candidates = sorted(fragments, key=len)
+    chosen = next((c for c in candidates if len(c) >= 2), fragments[0])
+
+    # Limiter à LABEL_MAX_WORDS mots
+    words = chosen.split()
+    if len(words) > LABEL_MAX_WORDS:
+        chosen = " ".join(words[:LABEL_MAX_WORDS]) + "…"
+
+    return chosen
+
+
 # ─── Structures de données ────────────────────────────────────────────────────
 
 @dataclass
 class VisualContext:
     """Texte OCR extrait autour de la zone d'action (ancre visuelle)."""
-    ocr_text: str                  # texte détecté dans la zone
+    ocr_text: str                  # texte complet détecté dans la zone
+    label: str                     # nom humain court déduit de l'OCR
     screenshot_region: list        # [x, y, w, h]
     screenshot_b64: Optional[str] = None  # PNG encodé base64 (facultatif)
+
 
 @dataclass
 class Action:
@@ -57,6 +158,7 @@ class Action:
     key:            Optional[str]  = None
     visual_context: Optional[dict] = None
     delay_before:   float          = 0.0   # délai depuis l'action précédente (s)
+
 
 # ─── Recorder principal ───────────────────────────────────────────────────────
 
@@ -140,7 +242,7 @@ class ActionRecorder:
         self._pending_click = (x, y, btn_name, t)
 
         action_type = "right_click" if btn_name == "right" else "click"
-        visual = self._capture_visual_context(x, y)
+        visual = self._capture_visual_context(x, y, action_type)
         delay  = self._compute_delay(t)
 
         action = Action(
@@ -154,8 +256,9 @@ class ActionRecorder:
         )
         with self._lock:
             self.actions.append(action)
-        log.info("[%d] %s en (%d, %d) — OCR: %r",
+        log.info("[%d] %s en (%d, %d) — label: %r — OCR: %r",
                  action.index, action_type, x, y,
+                 visual.label if visual else "",
                  visual.ocr_text[:60] if visual else "")
 
     # ── Handlers clavier ──────────────────────────────────────────────────────
@@ -184,7 +287,7 @@ class ActionRecorder:
         visual = None
         if key_name in ("enter", "tab", "escape"):
             cx, cy = pyautogui.position()
-            visual = self._capture_visual_context(cx, cy)
+            visual = self._capture_visual_context(cx, cy, "key")
 
         action = Action(
             index       = self._next_index(),
@@ -209,7 +312,7 @@ class ActionRecorder:
         t = self._last_key_time or time.time()
         delay = self._compute_delay(t)
         cx, cy = pyautogui.position()
-        visual = self._capture_visual_context(cx, cy)
+        visual = self._capture_visual_context(cx, cy, "type")
 
         action = Action(
             index       = self._next_index(),
@@ -222,37 +325,35 @@ class ActionRecorder:
         )
         with self._lock:
             self.actions.append(action)
-        log.info("[%d] Saisie: %r — OCR: %r",
+        log.info("[%d] Saisie: %r — label: %r — OCR: %r",
                  action.index, self._typed_buffer[:40],
+                 visual.label if visual else "",
                  visual.ocr_text[:60] if visual else "")
         self._typed_buffer = ""
 
     # ── Capture visuelle ──────────────────────────────────────────────────────
 
-    def _capture_visual_context(self, x: int, y: int) -> Optional[VisualContext]:
-        """Screenshot de la région autour du point, puis OCR."""
+    def _capture_visual_context(self, x: int, y: int,
+                                action_type: str = "click") -> Optional[VisualContext]:
+        """Screenshot de la région autour du point, puis OCR + label."""
         try:
-            sw, sh = pyautogui.size()
-            rx = max(0, x - SCREENSHOT_PADDING)
-            ry = max(0, y - SCREENSHOT_PADDING)
-            rw = min(SCREENSHOT_PADDING * 2, sw - rx)
-            rh = min(SCREENSHOT_PADDING * 2, sh - ry)
-
-            screenshot = pyautogui.screenshot(region=(rx, ry, rw, rh))
-            img_np = np.array(screenshot)
+            img, region = screenshot_region(x, y, SCREENSHOT_PADDING)
+            img_np = np.array(img)
 
             results = self._reader.readtext(img_np, detail=0)
             ocr_text = " | ".join(results).strip()
+            label = derive_label(ocr_text, action_type)
 
             ctx = VisualContext(
                 ocr_text         = ocr_text,
-                screenshot_region= [rx, ry, rw, rh],
+                label            = label,
+                screenshot_region= region,
             )
 
             if self.save_screenshots:
                 import base64, io
                 buf = io.BytesIO()
-                screenshot.save(buf, format="PNG")
+                img.save(buf, format="PNG")
                 ctx.screenshot_b64 = base64.b64encode(buf.getvalue()).decode()
 
             return ctx
@@ -281,7 +382,7 @@ class ActionRecorder:
 
         with self._lock:
             data = {
-                "version":    "1.0",
+                "version":    "2.0",
                 "recorded_at": ts,
                 "action_count": len(self.actions),
                 "actions": [asdict(a) for a in self.actions],
@@ -295,14 +396,15 @@ class ActionRecorder:
 
 # ─── CLI simple ───────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+def main():
     import sys
-
     recorder = ActionRecorder(save_screenshots="--screenshots" in sys.argv)
     recorder.start()
-
     print("Enregistrement en cours… Appuyez sur ENTRÉE pour arrêter.")
     input()
-
     session_path = recorder.stop()
     print(f"Session sauvegardée : {session_path}")
+
+
+if __name__ == "__main__":
+    main()
