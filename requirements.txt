@@ -15,6 +15,9 @@ numpy>=1.24.0
 # Multi-moniteurs (optionnel — repli gracieux si absent)
 screeninfo>=0.8.1
 
+# Dashboard web (v3)
+flask>=3.0.0
+
 # (optionnel) accélération GPU pour EasyOCR
 # torch>=2.0.0        # décommenter si GPU CUDA disponible
 # torchvision>=0.15.0

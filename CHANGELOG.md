@@ -5,6 +5,72 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [3.0.0] — 2026-06-11
+
+### Ajouté
+
+#### 🔁 Multi-run — Replay N fois la même session
+- `MultiReplayRunner` dans `replayer.py` : lance N exécutions consécutives d'une session avec intervalle configurable entre chaque run
+- Spinner **Répétitions (1–99)** et champ **Intervalle (s)** dans les options replay du GUI
+- Journal temps réel avec en-têtes de run colorés (`═══ Run X/N ═══`)
+- Chaque run est persisté individuellement en base SQLite (run_id, started_at, stats agrégées)
+- L'arrêt anticipé (bouton STOP) interrompt proprement le run en cours et les runs suivants
+
+#### 💾 Base de données SQLite — Statistiques long-terme
+- `stats_db.py` (nouveau) : schéma SQLite avec tables `sessions`, `runs`, `action_results`
+- Chaque replay (simple ou multi) insère automatiquement les résultats dans `winghost_stats.db`
+- Fonctions d'analyse : `get_label_stats()` (avg/max/min ms + taux de succès par label), `get_hourly_stats()` (avg ms par heure de la journée 0–23), `get_run_trend()` (tendance par run)
+- `export_csv()` : export CSV complet de tous les runs d'une session
+
+#### 📸 Screenshots post-action
+- Option **Capturer screenshots post-action** dans les options replay (GUI)
+- `ActionReplayer(capture_screenshots=True)` : après chaque action exécutée, capture une région élargie (120 px) autour des coordonnées en PNG base64
+- `ActionResult.screenshot_b64` : champ optionnel (None si capture désactivée)
+- Screenshots affichés en miniatures dans le rapport HTML (survol = zoom ×3.5) et dans le dashboard web
+- Le rapport JSON n'inclut pas les screenshots (garde le fichier lisible) ; le HTML les embarque inline
+
+#### 🌐 Dashboard web dynamique — `report_server.py` (nouveau)
+- Serveur Flask local lancé par le bouton **🌐 Dashboard Web** du GUI (port 5000 par défaut)
+- **Page d'accueil** `/` : liste toutes les sessions avec nombre de runs, avg global, date du dernier run
+- **Détail session** `/session/<id>` :
+  - Graphique **tendance avg/max (ms) par run** (Chart.js)
+  - **Heatmap horaire** : avg réponse + nb d'exécutions par heure de la journée (barres doubles)
+  - Tableau des runs avec statut OK/warn/error et liens vers le détail
+  - Tableau **Temps de réponse par bouton** (avg/max/min/taux OK par label)
+  - Bouton export CSV
+- **Détail run** `/run/<id>` : tableau complet avec screenshots inline, badge de statut, erreurs
+- **API JSON** : `/api/session/<id>/data`, `/api/run/<id>/data`
+- **Export CSV** : `/api/session/<id>/export.csv` (déclenche un téléchargement)
+- Thème dark identique à l'interface Tkinter (même palette CSS)
+- Le serveur s'arrête proprement à la fermeture de la fenêtre principale
+
+#### 📊 Onglet « Stats long-terme » dans le GUI
+- Troisième onglet dans le panneau droit
+- Combobox de sélection de session, bouton Actualiser
+- Treeview **Historique des runs** : run#, date, total/OK/ignorées/erreurs, avg/max (ms)
+- Treeview **Stats par bouton** : label, type, nb exécutions, avg/max/min (ms), taux OK
+- Bouton **⬇ Export CSV** : sauvegarde via dialogue fichier (encodage UTF-8 BOM pour Excel)
+- Rafraîchissement automatique après chaque replay terminé
+
+#### 🔧 Améliorations `ActionResult`
+- `.response_time_ms` (property) : temps en millisecondes (plus lisible que les secondes)
+- `.status` (property) : `"ok"` | `"skip"` | `"error"` (utilisé en DB et dans les rapports)
+- `.x`, `.y` exposés sur le résultat (coordonnées de l'action, utiles pour la capture screenshot)
+
+### Modifié
+- `replayer.py` : `save_report()` crée le JSON **sans** screenshots (lisible) + HTML **avec** screenshots inline
+- `replayer.py` : `save_to_db()` méthode publique sur `ActionReplayer` — persistance SQLite en une ligne
+- `gui.py` : titre → `WinGhost RPA v3`, layout élargi (980×700), option screenshots dans replay
+- `gui.py` : la barre de progression affiche le run courant (`Run X/N`) en multi-run
+- `gui.py` : après un multi-run, bascule automatiquement sur l'onglet Stats
+- `requirements.txt` : ajout `flask>=3.0.0`
+
+### Compatibilité
+- Sessions v1/v2 entièrement compatibles en replay
+- `save_report_html()` (alias v2) supprimé — utiliser `save_report()` qui génère les deux fichiers
+
+---
+
 ## [2.0.0] — 2026-06-11
 
 ### Ajouté
