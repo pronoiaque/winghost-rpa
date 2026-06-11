@@ -1,0 +1,17 @@
+# ─── RPA Recorder / Replayer ──────────────────────────────────────────────────
+# Python 3.10+  |  Windows recommandé (PyAutoGUI + pynput natifs)
+
+# Automatisation bureau
+pyautogui>=0.9.54
+pynput>=1.7.6
+
+# OCR
+easyocr>=1.7.1
+
+# Traitement image
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# (optionnel) accélération GPU pour EasyOCR
+# torch>=2.0.0        # décommenter si GPU CUDA disponible
+# torchvision>=0.15.0

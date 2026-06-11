@@ -1,0 +1,539 @@
+"""
+gui.py — Interface Tkinter pour enregistrer et rejouer des sessions.
+
+Fonctionnalités :
+  • Bouton RECORD  : démarre/arrête l'enregistreur (recorder.py)
+  • Sélection de session + bouton REPLAY
+  • Arrêt anticipé du replay
+  • Rapport de timing action-par-action avec graphique SVG embarqué
+  • Barre de progression + log en temps réel
+"""
+
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import threading
+import json
+import time
+import datetime
+from pathlib import Path
+import importlib.util, sys
+
+# Imports locaux
+try:
+    from recorder import ActionRecorder
+    from replayer import ActionReplayer, ActionResult, SESSIONS_DIR, REPORTS_DIR
+except ImportError as e:
+    messagebox.showerror("Import manquant", str(e))
+    sys.exit(1)
+
+# ─── Palette & constantes ─────────────────────────────────────────────────────
+
+BG        = "#1C1F26"
+BG2       = "#252932"
+BG3       = "#2E3440"
+ACCENT    = "#5E9BF0"
+ACCENT2   = "#F0965E"
+GREEN     = "#4EC9A0"
+RED       = "#E06C75"
+YELLOW    = "#E5C07B"
+FG        = "#D8DEE9"
+FG2       = "#7B8496"
+FONT_MONO = ("Consolas", 9)
+FONT_UI   = ("Segoe UI", 10)
+FONT_H1   = ("Segoe UI Semibold", 13)
+FONT_H2   = ("Segoe UI", 11)
+
+# ─── Application principale ───────────────────────────────────────────────────
+
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("RPA Recorder / Replayer")
+        self.configure(bg=BG)
+        self.resizable(True, True)
+        self.minsize(860, 640)
+
+        self._recorder: ActionRecorder | None = None
+        self._replayer: ActionReplayer | None = None
+        self._session_path: Path | None = None
+        self._replay_thread: threading.Thread | None = None
+        self._results: list[ActionResult] = []
+
+        self._build_ui()
+        self._refresh_session_list()
+
+    # ── Construction de l'interface ───────────────────────────────────────────
+
+    def _build_ui(self):
+        # ── En-tête ──────────────────────────────────────────────────────────
+        header = tk.Frame(self, bg=BG, pady=10)
+        header.pack(fill="x", padx=20)
+        tk.Label(header, text="RPA Recorder / Replayer",
+                 font=FONT_H1, bg=BG, fg=FG).pack(side="left")
+
+        self._status_var = tk.StringVar(value="Prêt")
+        tk.Label(header, textvariable=self._status_var,
+                 font=FONT_UI, bg=BG, fg=FG2).pack(side="right", padx=10)
+
+        sep = tk.Frame(self, bg=BG3, height=1)
+        sep.pack(fill="x", padx=20)
+
+        # ── Panneau principal (gauche + droite) ───────────────────────────────
+        main = tk.Frame(self, bg=BG)
+        main.pack(fill="both", expand=True, padx=20, pady=10)
+
+        left  = tk.Frame(main, bg=BG, width=280)
+        left.pack(side="left", fill="y", padx=(0, 12))
+        left.pack_propagate(False)
+
+        right = tk.Frame(main, bg=BG)
+        right.pack(side="left", fill="both", expand=True)
+
+        self._build_left_panel(left)
+        self._build_right_panel(right)
+
+    def _build_left_panel(self, parent):
+        # ── RECORD ───────────────────────────────────────────────────────────
+        rec_frame = tk.LabelFrame(parent, text=" ⬤  Enregistrement ",
+                                  font=FONT_UI, bg=BG2, fg=FG,
+                                  bd=1, relief="flat", padx=10, pady=10)
+        rec_frame.pack(fill="x", pady=(0, 12))
+
+        self._screenshots_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(rec_frame, text="Capturer les screenshots",
+                       variable=self._screenshots_var,
+                       bg=BG2, fg=FG2, selectcolor=BG3,
+                       activebackground=BG2, font=FONT_UI).pack(anchor="w")
+
+        self._rec_btn = tk.Button(
+            rec_frame, text="  ⬤  RECORD",
+            command=self._toggle_record,
+            bg=GREEN, fg=BG, font=("Segoe UI Semibold", 11),
+            relief="flat", padx=12, pady=6, cursor="hand2",
+        )
+        self._rec_btn.pack(fill="x", pady=(8, 0))
+
+        # ── Sessions ─────────────────────────────────────────────────────────
+        sess_frame = tk.LabelFrame(parent, text=" ▶  Sessions ",
+                                   font=FONT_UI, bg=BG2, fg=FG,
+                                   bd=1, relief="flat", padx=10, pady=10)
+        sess_frame.pack(fill="both", expand=True, pady=(0, 12))
+
+        # Listbox sessions
+        sb = tk.Scrollbar(sess_frame)
+        sb.pack(side="right", fill="y")
+
+        self._session_listbox = tk.Listbox(
+            sess_frame, bg=BG3, fg=FG, font=FONT_MONO,
+            selectbackground=ACCENT, selectforeground=BG,
+            relief="flat", highlightthickness=0,
+            yscrollcommand=sb.set,
+        )
+        self._session_listbox.pack(fill="both", expand=True)
+        sb.config(command=self._session_listbox.yview)
+        self._session_listbox.bind("<<ListboxSelect>>", self._on_session_select)
+
+        # Boutons sous la liste
+        btns = tk.Frame(sess_frame, bg=BG2)
+        btns.pack(fill="x", pady=(6, 0))
+
+        tk.Button(btns, text="Rafraîchir",
+                  command=self._refresh_session_list,
+                  bg=BG3, fg=FG2, font=FONT_UI,
+                  relief="flat", padx=6, pady=3, cursor="hand2",
+                  ).pack(side="left")
+        tk.Button(btns, text="Parcourir…",
+                  command=self._browse_session,
+                  bg=BG3, fg=FG2, font=FONT_UI,
+                  relief="flat", padx=6, pady=3, cursor="hand2",
+                  ).pack(side="left", padx=(4, 0))
+
+        # ── Options replay ────────────────────────────────────────────────────
+        opt_frame = tk.LabelFrame(parent, text=" ⚙  Options ",
+                                  font=FONT_UI, bg=BG2, fg=FG,
+                                  bd=1, relief="flat", padx=10, pady=8)
+        opt_frame.pack(fill="x", pady=(0, 12))
+
+        tk.Label(opt_frame, text="Seuil OCR :", bg=BG2, fg=FG2,
+                 font=FONT_UI).grid(row=0, column=0, sticky="w")
+        self._ocr_threshold_var = tk.DoubleVar(value=0.40)
+        ocr_slider = tk.Scale(
+            opt_frame, variable=self._ocr_threshold_var,
+            from_=0.0, to=1.0, resolution=0.05, orient="horizontal",
+            bg=BG2, fg=FG, troughcolor=BG3, highlightthickness=0,
+            sliderrelief="flat", font=FONT_UI,
+        )
+        ocr_slider.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        opt_frame.columnconfigure(1, weight=1)
+
+        # ── Boutons REPLAY / STOP ─────────────────────────────────────────────
+        action_frame = tk.Frame(parent, bg=BG)
+        action_frame.pack(fill="x")
+
+        self._replay_btn = tk.Button(
+            action_frame, text="  ▶  REPLAY",
+            command=self._start_replay,
+            bg=ACCENT, fg=BG, font=("Segoe UI Semibold", 11),
+            relief="flat", padx=12, pady=6, cursor="hand2",
+            state="disabled",
+        )
+        self._replay_btn.pack(fill="x", pady=(0, 4))
+
+        self._stop_btn = tk.Button(
+            action_frame, text="  ■  STOP",
+            command=self._stop_replay,
+            bg=RED, fg=BG, font=("Segoe UI Semibold", 11),
+            relief="flat", padx=12, pady=6, cursor="hand2",
+            state="disabled",
+        )
+        self._stop_btn.pack(fill="x")
+
+    def _build_right_panel(self, parent):
+        # ── Progression ───────────────────────────────────────────────────────
+        prog_frame = tk.Frame(parent, bg=BG)
+        prog_frame.pack(fill="x", pady=(0, 8))
+
+        self._progress_var = tk.DoubleVar(value=0)
+        self._progress_lbl = tk.Label(prog_frame, text="0 / 0",
+                                       font=FONT_UI, bg=BG, fg=FG2)
+        self._progress_lbl.pack(side="right")
+
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("RPA.Horizontal.TProgressbar",
+                         troughcolor=BG3, background=ACCENT,
+                         thickness=8, borderwidth=0)
+        self._progress = ttk.Progressbar(
+            prog_frame, variable=self._progress_var,
+            style="RPA.Horizontal.TProgressbar",
+            maximum=100, length=400,
+        )
+        self._progress.pack(fill="x", side="left", expand=True, padx=(0, 10))
+
+        # ── Onglets : Log / Rapport ───────────────────────────────────────────
+        nb_style = ttk.Style()
+        nb_style.configure("RPA.TNotebook",
+                            background=BG, borderwidth=0)
+        nb_style.configure("RPA.TNotebook.Tab",
+                            background=BG3, foreground=FG2,
+                            padding=[12, 4], font=FONT_UI)
+        nb_style.map("RPA.TNotebook.Tab",
+                     background=[("selected", BG2)],
+                     foreground=[("selected", FG)])
+
+        self._notebook = ttk.Notebook(parent, style="RPA.TNotebook")
+        self._notebook.pack(fill="both", expand=True)
+
+        # Onglet Log
+        log_tab = tk.Frame(self._notebook, bg=BG2)
+        self._notebook.add(log_tab, text="Journal")
+
+        self._log_text = tk.Text(
+            log_tab, bg=BG2, fg=FG, font=FONT_MONO,
+            relief="flat", highlightthickness=0,
+            state="disabled", wrap="word",
+        )
+        log_scroll = tk.Scrollbar(log_tab, command=self._log_text.yview)
+        self._log_text.configure(yscrollcommand=log_scroll.set)
+        log_scroll.pack(side="right", fill="y")
+        self._log_text.pack(fill="both", expand=True, padx=2, pady=2)
+
+        self._log_text.tag_configure("ok",      foreground=GREEN)
+        self._log_text.tag_configure("warn",     foreground=YELLOW)
+        self._log_text.tag_configure("error",    foreground=RED)
+        self._log_text.tag_configure("info",     foreground=FG2)
+        self._log_text.tag_configure("heading",  foreground=ACCENT,
+                                     font=("Consolas", 9, "bold"))
+
+        # Onglet Rapport
+        report_tab = tk.Frame(self._notebook, bg=BG2)
+        self._notebook.add(report_tab, text="Rapport")
+        self._build_report_tab(report_tab)
+
+    def _build_report_tab(self, parent):
+        # Tableau des résultats
+        cols = ("#", "Type", "OCR Score", "Visuel OK", "Réponse (s)", "Statut")
+        tree_frame = tk.Frame(parent, bg=BG2)
+        tree_frame.pack(fill="both", expand=True, padx=4, pady=4)
+
+        tree_scroll = tk.Scrollbar(tree_frame)
+        tree_scroll.pack(side="right", fill="y")
+
+        ts = ttk.Style()
+        ts.configure("RPA.Treeview",
+                     background=BG3, fieldbackground=BG3,
+                     foreground=FG, rowheight=22, font=FONT_MONO,
+                     borderwidth=0)
+        ts.configure("RPA.Treeview.Heading",
+                     background=BG2, foreground=ACCENT,
+                     font=("Segoe UI Semibold", 9))
+        ts.map("RPA.Treeview",
+               background=[("selected", ACCENT)],
+               foreground=[("selected", BG)])
+
+        self._tree = ttk.Treeview(
+            tree_frame, columns=cols, show="headings",
+            style="RPA.Treeview",
+            yscrollcommand=tree_scroll.set,
+        )
+        for col in cols:
+            self._tree.heading(col, text=col)
+        self._tree.column("#",          width=40,  stretch=False)
+        self._tree.column("Type",       width=110, stretch=False)
+        self._tree.column("OCR Score",  width=80,  stretch=False)
+        self._tree.column("Visuel OK",  width=75,  stretch=False)
+        self._tree.column("Réponse (s)",width=90,  stretch=False)
+        self._tree.column("Statut",     width=200, stretch=True)
+
+        tree_scroll.config(command=self._tree.yview)
+        self._tree.pack(fill="both", expand=True)
+
+        # Pied du rapport
+        footer = tk.Frame(parent, bg=BG2)
+        footer.pack(fill="x", padx=4, pady=(0, 4))
+
+        self._summary_lbl = tk.Label(
+            footer, text="", font=FONT_UI, bg=BG2, fg=FG2, anchor="w"
+        )
+        self._summary_lbl.pack(side="left")
+
+        tk.Button(
+            footer, text="Exporter JSON",
+            command=self._export_report,
+            bg=BG3, fg=FG2, font=FONT_UI,
+            relief="flat", padx=8, pady=3, cursor="hand2",
+        ).pack(side="right", padx=(4, 0))
+
+        tk.Button(
+            footer, text="Ouvrir dossier rapports",
+            command=lambda: self._open_folder(REPORTS_DIR),
+            bg=BG3, fg=FG2, font=FONT_UI,
+            relief="flat", padx=8, pady=3, cursor="hand2",
+        ).pack(side="right")
+
+    # ── Sessions ──────────────────────────────────────────────────────────────
+
+    def _refresh_session_list(self):
+        self._session_listbox.delete(0, "end")
+        sessions = sorted(SESSIONS_DIR.glob("session_*.json"), reverse=True)
+        for s in sessions:
+            self._session_listbox.insert("end", s.name)
+        if sessions:
+            self._session_listbox.selection_set(0)
+            self._on_session_select(None)
+
+    def _on_session_select(self, _event):
+        sel = self._session_listbox.curselection()
+        if not sel:
+            return
+        name = self._session_listbox.get(sel[0])
+        self._session_path = SESSIONS_DIR / name
+        self._replay_btn.config(state="normal")
+        self._status_var.set(f"Session : {name}")
+
+    def _browse_session(self):
+        path = filedialog.askopenfilename(
+            title="Choisir une session",
+            initialdir=SESSIONS_DIR,
+            filetypes=[("JSON", "*.json"), ("Tous", "*.*")],
+        )
+        if path:
+            self._session_path = Path(path)
+            self._replay_btn.config(state="normal")
+            self._status_var.set(f"Session : {Path(path).name}")
+
+    # ── Enregistrement ────────────────────────────────────────────────────────
+
+    def _toggle_record(self):
+        if self._recorder is None:
+            # Démarrage
+            self._recorder = ActionRecorder(
+                save_screenshots=self._screenshots_var.get()
+            )
+            self._recorder.start()
+            self._rec_btn.config(text="  ■  STOP RECORD", bg=RED)
+            self._replay_btn.config(state="disabled")
+            self._status_var.set("⬤ Enregistrement en cours…")
+            self._log("⬤ Enregistrement démarré.", "heading")
+        else:
+            # Arrêt
+            path = self._recorder.stop()
+            self._recorder = None
+            self._rec_btn.config(text="  ⬤  RECORD", bg=GREEN)
+            self._log(f"■ Session sauvegardée : {path.name}", "ok")
+            self._status_var.set(f"Session enregistrée : {path.name}")
+            self._refresh_session_list()
+            self._replay_btn.config(state="normal")
+
+    # ── Replay ────────────────────────────────────────────────────────────────
+
+    def _start_replay(self):
+        if not self._session_path or not self._session_path.exists():
+            messagebox.showwarning("Session introuvable",
+                                   "Sélectionnez ou enregistrez d'abord une session.")
+            return
+
+        self._results.clear()
+        self._clear_tree()
+        self._log(f"▶ Début du replay : {self._session_path.name}", "heading")
+        self._replay_btn.config(state="disabled")
+        self._stop_btn.config(state="normal")
+        self._progress_var.set(0)
+        self._status_var.set("Replay en cours…")
+        self._notebook.select(0)  # Affiche le journal
+
+        self._replayer = ActionReplayer(
+            ocr_similarity_min=self._ocr_threshold_var.get(),
+            on_progress=self._on_action_progress,
+        )
+
+        session = self._replayer.load_session(self._session_path)
+        total   = len(session.get("actions", []))
+        self._total_actions = total
+
+        self._replay_thread = threading.Thread(
+            target=self._run_replay,
+            args=(session,),
+            daemon=True,
+        )
+        self._replay_thread.start()
+
+    def _run_replay(self, session: dict):
+        try:
+            results = self._replayer.replay(session)
+            self._results = results
+            report_path = self._replayer.save_report(self._session_path)
+            self.after(0, self._on_replay_done, results, report_path)
+        except Exception as e:
+            self.after(0, self._log, f"ERREUR replay : {e}", "error")
+            self.after(0, self._on_replay_finished)
+
+    def _stop_replay(self):
+        if self._replayer:
+            self._replayer.stop()
+        self._log("■ Replay interrompu par l'utilisateur.", "warn")
+
+    def _on_action_progress(self, current: int, total: int, result: ActionResult):
+        """Appelé depuis le thread replay — doit passer par after()."""
+        self.after(0, self._update_progress, current, total, result)
+
+    def _update_progress(self, current: int, total: int, result: ActionResult):
+        pct = (current / total * 100) if total > 0 else 0
+        self._progress_var.set(pct)
+        self._progress_lbl.config(text=f"{current} / {total}")
+
+        if result.skipped:
+            tag = "warn"
+            status = f"IGNORÉ — {result.error or ''}"
+        elif result.error:
+            tag = "error"
+            status = f"ERREUR — {result.error}"
+        else:
+            tag = "ok"
+            rt   = f"{result.response_time:.3f}s" if result.response_time is not None else "—"
+            status = f"OK  ⏱ {rt}"
+
+        msg = (f"[{result.index:>3}] {result.action_type:<14}  "
+               f"OCR={result.ocr_match:.2f if result.ocr_match is not None else '—':>5}  "
+               f"{status}")
+        self._log(msg, tag)
+        self._add_tree_row(result)
+
+    def _on_replay_done(self, results: list[ActionResult], report_path: Path):
+        self._on_replay_finished()
+        self._log(f"✔ Replay terminé. Rapport : {report_path.name}", "ok")
+        self._status_var.set("Replay terminé.")
+        self._notebook.select(1)  # Bascule sur l'onglet Rapport
+        self._update_summary(results)
+
+    def _on_replay_finished(self):
+        self._replay_btn.config(state="normal")
+        self._stop_btn.config(state="disabled")
+        self._progress_var.set(100)
+
+    # ── Rapport ───────────────────────────────────────────────────────────────
+
+    def _add_tree_row(self, r: ActionResult):
+        ocr_score = f"{r.ocr_match:.2f}" if r.ocr_match is not None else "—"
+        visual_ok = "✔" if r.visual_ok else ("✘" if r.visual_ok is False else "—")
+        resp      = f"{r.response_time:.3f}" if r.response_time is not None else "—"
+
+        if r.skipped:
+            tag, status = "warn", f"IGNORÉ"
+        elif r.error:
+            tag, status = "error", r.error[:60]
+        else:
+            tag, status = "ok", "OK"
+
+        iid = self._tree.insert(
+            "", "end",
+            values=(r.index, r.action_type, ocr_score, visual_ok, resp, status),
+        )
+        self._tree.tag_configure("ok",    foreground=GREEN)
+        self._tree.tag_configure("warn",  foreground=YELLOW)
+        self._tree.tag_configure("error", foreground=RED)
+        self._tree.item(iid, tags=(tag,))
+
+    def _clear_tree(self):
+        for item in self._tree.get_children():
+            self._tree.delete(item)
+        self._summary_lbl.config(text="")
+
+    def _update_summary(self, results: list[ActionResult]):
+        total  = len(results)
+        ok     = sum(1 for r in results if not r.skipped and not r.error)
+        skip   = sum(1 for r in results if r.skipped)
+        errors = sum(1 for r in results if r.error)
+        times  = [r.response_time for r in results if r.response_time is not None]
+        avg_t  = f"{sum(times)/len(times):.3f}s" if times else "—"
+        max_t  = f"{max(times):.3f}s" if times else "—"
+
+        self._summary_lbl.config(
+            text=f"Total {total}  ✔ OK {ok}  ⚠ Ignorées {skip}  ✘ Erreurs {errors}"
+                 f"   ⏱ Avg {avg_t}  Max {max_t}"
+        )
+
+    def _export_report(self):
+        if not self._results:
+            messagebox.showinfo("Rapport vide", "Aucun résultat disponible.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Exporter le rapport",
+            initialdir=REPORTS_DIR,
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json")],
+        )
+        if path:
+            data = [r.to_dict() for r in self._results]
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            self._log(f"Rapport exporté → {path}", "ok")
+
+    # ── Journal ───────────────────────────────────────────────────────────────
+
+    def _log(self, message: str, tag: str = "info"):
+        ts  = datetime.datetime.now().strftime("%H:%M:%S")
+        line = f"[{ts}] {message}\n"
+        self._log_text.config(state="normal")
+        self._log_text.insert("end", line, tag)
+        self._log_text.see("end")
+        self._log_text.config(state="disabled")
+
+    # ── Utilitaires ───────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _open_folder(path: Path):
+        import os, subprocess
+        if sys.platform == "win32":
+            os.startfile(str(path))
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+
+
+# ─── Lancement ────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()
