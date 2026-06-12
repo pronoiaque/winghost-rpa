@@ -5,6 +5,30 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [6.1.0] — 2026-06-12
+
+### Corrigé
+
+#### 🖱️ Tous les inputs souris désormais capturés et rejoués
+- **Bug v6** : seuls les *mouvements* étaient des nouveautés visibles ; en condition réelle, les **clics ne se rejouaient pas** alors que les mouvements (non soumis à l'OCR) défilaient — symptôme « la souris bouge mais ne clique pas »
+- **Cause** : le contexte OCR d'un clic tombait sous le seuil par défaut (`0.40`) → l'action était *ignorée* (skip strict), tandis que les `move` passaient toujours
+- **Correctif** : seuil OCR par défaut abaissé à **`0.25`** (`OCR_SIMILARITY_MIN`, slider GUI) pour réduire les faux négatifs, **tout en conservant le gate OCR strict** demandé par la spec (« rejeu uniquement si match »)
+
+### Ajouté
+
+#### 🆕 Inputs souris complets (recorder + replayer)
+- **Clic milieu** (`middle_click`) : auparavant enregistré à tort comme clic gauche ; désormais distingué et rejoué via `pyautogui.middleClick`
+- **Molette** (`scroll`) : nouvel handler `on_scroll` → action `scroll` (`scroll_dx`/`scroll_dy`), rejouée via `pyautogui.scroll` / `hscroll` (facteur `SCROLL_REPLAY_AMOUNT = 100`)
+- **Glisser-déposer** (`drag`) : détection press→déplacement→release (seuil `DRAG_MIN_DIST_PX = 12`) ; les mouvements intermédiaires (bouton maintenu) ne sont plus enregistrés comme `move` isolés ; rejeu via `pyautogui.moveTo` + `dragTo`
+- Le glisser et le clic milieu restent soumis au **gate OCR** (contexte visuel capturé au press), conformément à la spec
+
+### Détails techniques
+- `Action` enrichi : champs `x2`, `y2` (destination du drag), `scroll_dx`, `scroll_dy`
+- `recorder` : suivi de l'état bouton (`_press_info`, `_button_down`) ; les `move` sont ignorés tant qu'un bouton est maintenu
+- Le double-clic reste détecté correctement (non confondu avec un drag)
+
+---
+
 ## [6.0.0] — 2026-06-12
 
 ### Ajouté

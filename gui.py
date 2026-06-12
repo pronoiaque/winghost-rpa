@@ -1,6 +1,10 @@
 """
 gui.py — Interface CustomTkinter pour WinGhost RPA.
 
+v6.1 :
+  • Seuil OCR par défaut abaissé à 0.25 (réduit les faux négatifs sur les clics)
+  • Titre mis à jour : WinGhost RPA v6.1
+
 v6 :
   • Splash screen au démarrage avec préchargement EasyOCR en arrière-plan
   • Lecteur OCR partagé (`_ocr_reader`) transmis au recorder et au replayer
@@ -258,7 +262,7 @@ class _ScenarioRow(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("WinGhost RPA v6")
+        self.title("WinGhost RPA v6.1")
         self.configure(fg_color=_BG)
         self.minsize(1000, 700)
         self._center_window(1060, 740)
@@ -322,7 +326,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(splash, text="🤖  WinGhost RPA",
                      font=("Segoe UI Bold", 26), text_color=_ACCENT).pack(pady=(36, 4))
-        ctk.CTkLabel(splash, text="v6 — Robot Process Automation",
+        ctk.CTkLabel(splash, text="v6.1 — Robot Process Automation",
                      font=("Segoe UI", 12), text_color=_FG2).pack()
         ctk.CTkLabel(splash, text="© WinGhost 2026",
                      font=("Segoe UI", 9), text_color=_FG2).pack(side="bottom", pady=10)
@@ -374,7 +378,7 @@ class App(ctk.CTk):
         header.pack(fill="x")
         header.pack_propagate(False)
 
-        ctk.CTkLabel(header, text="🤖  WinGhost RPA v6",
+        ctk.CTkLabel(header, text="🤖  WinGhost RPA v6.1",
                      font=_FONT_H1, text_color=_ACCENT).pack(
             side="left", padx=20)
 
@@ -496,7 +500,7 @@ class App(ctk.CTk):
         ocr_row.pack(fill="x", padx=10, pady=2)
         ctk.CTkLabel(ocr_row, text="Seuil OCR", font=_FONT_SM,
                      text_color=_FG2, width=90).pack(side="left")
-        self._ocr_threshold_var = tk.DoubleVar(value=0.40)
+        self._ocr_threshold_var = tk.DoubleVar(value=0.25)
         ocr_lbl = ctk.CTkLabel(ocr_row, textvariable=tk.StringVar(),
                                 font=_FONT_SM, text_color=_FG, width=36)
         ocr_lbl.pack(side="right")

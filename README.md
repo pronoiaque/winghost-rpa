@@ -1,11 +1,20 @@
-# WinGhost RPA v6
+# WinGhost RPA v6.1
 
-> Enregistreur / Rejoueur RPA Windows avec ancrage visuel OCR, **enregistrement des mouvements souris**, **splash screen de démarrage**, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
+> Enregistreur / Rejoueur RPA Windows avec ancrage visuel OCR, **capture de tous les inputs souris** (clics, molette, glisser), enregistrement des mouvements, splash screen de démarrage, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
 
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-6.0.0-green)
+![Version](https://img.shields.io/badge/version-6.1.0-green)
+
+---
+
+## Nouveautés v6.1
+
+| Fonctionnalité | Description |
+|---|---|
+| 🖱️ **Tous les inputs souris** | Le recorder capture désormais le **clic milieu** (`middle_click`), la **molette** (`scroll`) et le **glisser-déposer** (`drag`) — en plus des clics gauche/droit, double-clics et mouvements |
+| 🐛 **Clics rejoués de façon fiable** | Correction du symptôme « la souris bouge mais ne clique pas » : seuil OCR par défaut abaissé à **0.25** (était 0.40) pour éviter les faux négatifs qui faisaient sauter les clics, tout en conservant le gate OCR strict |
 
 ---
 
@@ -50,7 +59,7 @@
 
 ### 1. Enregistrement (`recorder.py`)
 
-L'outil écoute les événements souris et clavier via **pynput**. Les **déplacements du curseur** sont enregistrés en continu (action `move`), throttlés à 10 FPS max et 15 px min pour limiter le volume. À chaque clic ou saisie :
+L'outil écoute **tous les inputs** souris et clavier via **pynput** : clics gauche / droit / **milieu**, double-clics, **molette** (`scroll`), **glisser-déposer** (`drag`), déplacements du curseur (`move`, throttlé à 10 FPS / 15 px) et saisies clavier. À chaque clic ou saisie :
 
 1. Capture du **nom de l'application** active (processus Windows via pywin32 + psutil)
 2. Screenshot de la région autour du curseur (±160 px, multi-moniteurs)

@@ -2,6 +2,9 @@
 recorder.py — Enregistrement des actions utilisateur (clics + saisies)
 avec capture visuelle de la zone cible via EasyOCR.
 
+v6.1 : capture de TOUS les inputs souris — clic milieu (middle_click),
+       molette (scroll), glisser-déposer (drag press→release)
+
 v6 : enregistrement des mouvements souris (action "move", throttlé)
      + paramètre `reader` pour réutiliser un lecteur OCR déjà chargé
 
@@ -50,6 +53,7 @@ DOUBLE_CLICK_GAP   = 0.3         # secondes max entre deux clics pour détecter 
 LABEL_MAX_WORDS    = 4           # nombre max de mots dans un label auto-généré
 MOVE_THROTTLE_S  = 0.10   # intervalle min entre deux mouvements enregistrés (s)
 MOVE_MIN_DIST_PX = 15     # distance min (px) pour enregistrer un mouvement
+DRAG_MIN_DIST_PX = 12     # distance min (px) entre press et release pour qualifier un glisser
 
 logging.basicConfig(
     level=logging.INFO,
@@ -189,11 +193,17 @@ class VisualContext:
 @dataclass
 class Action:
     index:          int
-    action_type:    str            # "click" | "double_click" | "right_click" | "type" | "key"
+    # "click" | "double_click" | "right_click" | "middle_click" | "drag"
+    # | "scroll" | "move" | "type" | "key"
+    action_type:    str
     timestamp:      float          # epoch
     x:              Optional[int]  = None
     y:              Optional[int]  = None
+    x2:             Optional[int]  = None   # destination du glisser (drag)
+    y2:             Optional[int]  = None
     button:         Optional[str]  = None
+    scroll_dx:      Optional[int]  = None   # défilement horizontal (molette)
+    scroll_dy:      Optional[int]  = None   # défilement vertical (molette)
     text:           Optional[str]  = None
     key:            Optional[str]  = None
     visual_context: Optional[dict] = None
@@ -213,6 +223,8 @@ class ActionRecorder:
         self._last_timestamp: float = 0.0
         self._action_index = 0
         self._pending_click: Optional[tuple] = None   # (x, y, button, t)
+        self._press_info: Optional[tuple] = None      # (x, y, button, t) du bouton enfoncé
+        self._button_down: bool = False               # un bouton souris est-il maintenu ?
         self._typed_buffer: str = ""
         self._last_key_time: float = 0.0
         self._mouse_listener  = None
@@ -240,7 +252,8 @@ class ActionRecorder:
 
         self._mouse_listener = mouse.Listener(
             on_move=self._on_move,
-            on_click=self._on_click
+            on_click=self._on_click,
+            on_scroll=self._on_scroll,
         )
         self._keyboard_listener = keyboard.Listener(
             on_press=self._on_key_press,
@@ -267,14 +280,39 @@ class ActionRecorder:
     # ── Handlers souris ───────────────────────────────────────────────────────
 
     def _on_click(self, x, y, button, pressed):
-        if not self.recording or not pressed:
+        if not self.recording:
             return
 
         t = time.time()
         btn_name = button.name  # "left" | "right" | "middle"
 
+        # ── Relâchement : fin éventuelle d'un glisser (drag) ───────────────────
+        if not pressed:
+            self._button_down = False
+            press = self._press_info
+            self._press_info = None
+            if press is None:
+                return
+            px, py, _pbtn, _pt = press
+            dist = ((x - px) ** 2 + (y - py) ** 2) ** 0.5
+            if dist >= DRAG_MIN_DIST_PX:
+                # Convertit le clic enregistré au press en glisser (drag).
+                with self._lock:
+                    if self.actions and self.actions[-1].action_type in (
+                            "click", "right_click", "middle_click"):
+                        a = self.actions[-1]
+                        a.action_type = "drag"
+                        a.x2, a.y2 = x, y
+                        self._pending_click = None
+                        log.info("[%d] drag (%d,%d) → (%d,%d)",
+                                 a.index, px, py, x, y)
+            return
+
+        # ── Enfoncement : clic / double-clic ───────────────────────────────────
         # Flush la saisie clavier en cours avant tout clic
         self._flush_typed_buffer()
+        self._button_down = True
+        self._press_info  = (x, y, btn_name, t)
 
         # Détection double-clic
         if (self._pending_click and
@@ -291,7 +329,8 @@ class ActionRecorder:
 
         self._pending_click = (x, y, btn_name, t)
 
-        action_type = "right_click" if btn_name == "right" else "click"
+        action_type = {"right": "right_click",
+                       "middle": "middle_click"}.get(btn_name, "click")
         visual = self._capture_visual_context(x, y, action_type)
         delay  = self._compute_delay(t)
 
@@ -312,8 +351,34 @@ class ActionRecorder:
                  visual.label if visual else "",
                  visual.ocr_text[:60] if visual else "")
 
+    def _on_scroll(self, x: int, y: int, dx: int, dy: int):
+        if not self.recording:
+            return
+        # Une molette valide souvent une saisie en cours → on la consigne avant
+        self._flush_typed_buffer()
+        t = time.time()
+        delay = self._compute_delay(t)
+        action = Action(
+            index       = self._next_index(),
+            action_type = "scroll",
+            timestamp   = t,
+            x=x, y=y,
+            scroll_dx   = int(dx),
+            scroll_dy   = int(dy),
+            delay_before= delay,
+            app_name    = get_foreground_app(),
+        )
+        with self._lock:
+            self.actions.append(action)
+        log.info("[%d] scroll (dx=%d, dy=%d) en (%d, %d)",
+                 action.index, int(dx), int(dy), x, y)
+
     def _on_move(self, x: int, y: int):
         if not self.recording:
+            return
+        # Mouvement effectué bouton enfoncé → fait partie d'un glisser, ignoré ici
+        # (le glisser complet est consigné au relâchement par _on_click)
+        if self._button_down:
             return
         t = time.time()
         dt   = t - self._last_move_time

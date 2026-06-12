@@ -1,6 +1,9 @@
 """
 replayer.py — Replay de session avec vérification OCR et mesure de timing.
 
+v6.1 : rejeu de TOUS les inputs souris — clic milieu (middle_click), molette
+       (scroll), glisser-déposer (drag) ; seuil OCR par défaut abaissé à 0.25
+
 v6 : gestion de l'action "move" (déplacement souris throttlé depuis le recorder)
      + paramètre `reader` pour réutiliser un lecteur OCR partagé
 
@@ -59,7 +62,9 @@ REPORTS_DIR            = Path("reports")
 REPORTS_DIR.mkdir(exist_ok=True)
 
 OCR_LANGUAGES          = ["fr", "en"]
-OCR_SIMILARITY_MIN     = 0.40
+OCR_SIMILARITY_MIN     = 0.25   # v6.1 : abaissé (était 0.40) pour réduire les
+                                #        faux négatifs qui faisaient sauter les clics
+SCROLL_REPLAY_AMOUNT   = 100    # facteur appliqué à dy/dx de la molette au rejeu
 RESPONSE_WAIT_MAX      = 10.0
 RESPONSE_POLL_INTERVAL = 0.05
 SCREEN_DIFF_THRESHOLD  = 0.005
@@ -671,6 +676,27 @@ td.status{{font-weight:700}}
             pyautogui.doubleClick(x, y)
         elif atype == "right_click":
             pyautogui.rightClick(x, y)
+        elif atype == "middle_click":
+            pyautogui.middleClick(x, y)
+        elif atype == "drag":
+            x2, y2 = raw.get("x2"), raw.get("y2")
+            btn = raw.get("button") or "left"
+            if x is not None and y is not None:
+                pyautogui.moveTo(x, y)
+            if x2 is not None and y2 is not None:
+                pyautogui.dragTo(x2, y2, duration=0.3, button=btn)
+        elif atype == "scroll":
+            if x is not None and y is not None:
+                pyautogui.moveTo(x, y)
+            dy = raw.get("scroll_dy") or 0
+            dx = raw.get("scroll_dx") or 0
+            if dy:
+                pyautogui.scroll(int(dy) * SCROLL_REPLAY_AMOUNT)
+            if dx:
+                try:
+                    pyautogui.hscroll(int(dx) * SCROLL_REPLAY_AMOUNT)
+                except Exception:
+                    pass
         elif atype == "type":
             if x and y:
                 pyautogui.click(x, y)
