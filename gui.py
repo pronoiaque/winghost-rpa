@@ -582,9 +582,12 @@ class App(ctk.CTk):
         self._tabs.add("Stats long-terme")
         self._tabs._segmented_button.configure(font=_FONT_SM)
 
-        # Bind tab change pour rafraîchir les stats
-        self._tabs._segmented_button.bind("<Button-1>",
-                                          lambda e: self.after(100, self._on_tab_changed))
+        # Rafraîchit les stats lors du changement d'onglet
+        try:
+            self._tabs._segmented_button.configure(
+                command=lambda _tab: self.after(100, self._on_tab_changed))
+        except Exception:
+            pass
 
         self._build_journal_tab(self._tabs.tab("Journal"))
         self._build_report_tab(self._tabs.tab("Rapport"))
