@@ -5,6 +5,59 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [5.0.0] — 2026-06-12
+
+### Ajouté
+
+#### 🔁 Mode automatique (daemon) — `scheduler.py` (nouveau)
+- `SchedulerRunner` : rejoue un scénario **en boucle à intervalle régulier** (par défaut **30 min**, conformément à la spec métier « tourner toutes les 30 mins »)
+- Réutilise un seul `ActionReplayer` entre les cycles (EasyOCR chargé une fois)
+- Persistance DB + écriture du journal officiel à **chaque cycle**
+- Attente inter-cycles interruptible (arrêt propre via `stop()`)
+- Callbacks : `on_cycle_start`, `on_cycle_done(cycle, results, status, run_id)`, `on_progress`, `on_wait`
+- CLI : `python scheduler.py <scenario.json> --interval-min=30 [--max-cycles=N]`
+
+#### 📥 Réduction en zone de notification (systray)
+- Au démarrage du mode automatique, la fenêtre se **réduit dans le systray** (via `pystray`)
+- Icône dédiée + menu : **Ouvrir WinGhost** (clic par défaut), **Arrêter l'automatique**, **Quitter**
+- Un clic sur l'icône restaure la fenêtre (`deiconify` + `lift` + `focus`)
+- Repli gracieux sur une réduction classique (`iconify`) si `pystray` est indisponible
+
+#### 🚨 Alerte sur échec — gros popup
+- `_show_failure_popup()` : `CTkToplevel` plein cadre, rouge, avec ✘ géant, nom du scénario, n° de cycle et **liste des actions fautives**
+- Déclenché dès qu'une exécution se solde par un statut `ÉCHEC` — en mode automatique **comme** en replay manuel (simple et multi-run)
+- Restaure automatiquement la fenêtre depuis le systray + signal sonore (`bell`)
+
+#### 🎯 Application cible (`target_app`)
+- Champ **App** dans la section Enregistrement : l'utilisateur saisit le nom de l'application visée
+- Stocké au niveau du scénario (`"target_app"` dans le JSON), pré-rempli à la sélection d'un scénario
+- **Prioritaire** sur le nom de processus détecté automatiquement pour la colonne `app_name` du journal officiel
+- CLI recorder : `python recorder.py --name="…" --app="…"`
+
+#### ⏱️ Deux métriques de temps distinctes
+- `app_response_ms` (nouvelle colonne `runs`) : **temps applicatif cumulé** = somme des temps de réponse (réactivité pure)
+- `total_duration_s` (existant) : **temps de bout en bout** = durée d'horloge réelle (valeur du journal officiel)
+- Dashboard : **deux cartes** + **deux colonnes** dans l'historique des runs, chacune avec une **bulle d'aide** (`info` au survol) expliquant la différence
+- Les deux métriques sont ajoutées à l'export CSV (`export_csv`)
+
+### Modifié
+- `stats_db.py` : colonne `app_response_ms` sur `runs` + migration `_migrate` ; `finish_run()` accepte `app_response_ms` ; `export_csv()` inclut `total_duration_s` et `app_response_ms`
+- `replayer.py` : `save_to_db()` calcule et persiste `app_response_ms` ; `write_official_log()` privilégie `target_app` du scénario
+- `recorder.py` : `ActionRecorder(scenario_name, target_app)` ; champ `target_app` sauvegardé dans le scénario
+- `report_server.py` : page session enrichie (cartes + colonnes + tooltips CSS `.tip`)
+- `gui.py` : titre → `v5` ; champ Application cible ; bloc « Mode automatique » (intervalle min + bouton) ; intégration systray ; popup d'échec ; arrêt propre du scheduler à la fermeture
+- `requirements.txt` / `pyproject.toml` : ajout `pystray>=0.19.4`, version `5.0.0`
+
+### Corrigé
+- `report_server.py` : f-string à guillemets imbriqués (ligne de la colonne OCR) qui cassait la compatibilité Python 3.10/3.11 (PEP 701 réservé à 3.12+) — extraction des valeurs avant le f-string
+
+### Compatibilité
+- Scénarios v1/v2/v3 toujours pleinement compatibles
+- Bases SQLite antérieures migrées automatiquement (ajout de `app_response_ms`)
+- `pystray` optionnel à l'exécution : sans lui, le mode automatique tourne quand même (fenêtre réduite classiquement)
+
+---
+
 ## [4.0.0] — 2026-06-12
 
 ### Ajouté
@@ -55,8 +108,8 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 - `replayer.py` : `write_official_log()` méthode publique — calcule durée, statut, app dominante ; appelée par `save_to_db()` ; `_last_session` stocké après `load_session()` ; `SCENARIOS_DIR` en priorité dans la recherche CLI
 - `stats_db.py` : colonnes `scenario_name` (sessions), `total_duration_s` (runs), `app_name` (action_results) ; fonction `_migrate(conn)` pour bases existantes ; tous les accesseurs mis à jour
 - `gui.py` : titre → `WinGhost RPA v4`, layout 1020×750, `_log_debug()` / `_log_official()` pour les deux canaux
-- `requirements.txt` : ajout `customtkinter>=5.2.0`, `pywin32>=306` (opt.), `psutil>=5.9.0` (opt.)
-- `pyproject.toml` : version `4.0.0`
+- `requirements.txt` : ajout `customtkinter>=5.2.0`, `pywin32>=306`, `psutil>=5.9.0` (dépendances standard, plus optionnelles) ; `screeninfo` reclassé en dépendance standard
+- `pyproject.toml` : version `4.0.0` ; `dependencies` complétées avec `screeninfo`, `flask`, `customtkinter`, `pywin32`, `psutil`
 
 ### Supprimé
 - Checkbox **Capturer screenshots post-action** dans le GUI (screenshots toujours actifs)

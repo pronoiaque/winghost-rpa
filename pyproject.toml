@@ -4,8 +4,8 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "winghost-rpa"
-version = "4.0.0"
-description = "Enregistreur / rejoueur RPA Windows avec ancrage visuel OCR, scénarios nommés, log officiel CSV, dashboard web et interface CustomTkinter"
+version = "5.0.0"
+description = "Enregistreur / rejoueur RPA Windows avec ancrage visuel OCR, scénarios nommés, log officiel CSV, mode automatique (systray), dashboard web et interface CustomTkinter"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
@@ -34,6 +34,12 @@ dependencies = [
     "easyocr>=1.7.1",
     "Pillow>=10.0.0",
     "numpy>=1.24.0",
+    "screeninfo>=0.8.1",
+    "flask>=3.0.0",
+    "customtkinter>=5.2.0",
+    "pywin32>=306",
+    "psutil>=5.9.0",
+    "pystray>=0.19.4",
 ]
 
 [project.urls]

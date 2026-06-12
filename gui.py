@@ -1,6 +1,13 @@
 """
 gui.py — Interface CustomTkinter pour WinGhost RPA.
 
+v5 :
+  • Mode automatique (daemon) : rejoue un scénario en boucle (30 min par défaut)
+  • Réduction dans la zone de notification (systray) pendant l'automatique
+  • Alerte « gros popup » en cas d'échec d'un cycle
+  • Champ « Application cible » pour le journal officiel
+  • Dashboard : deux métriques de temps (bout-en-bout + applicatif) avec bulles d'info
+
 v4 :
   • Migration Tkinter → CustomTkinter (thème dark moderne, coins arrondis)
   • Bulles d'aide (CTkToolTip) sur tous les boutons et contrôles
@@ -38,12 +45,21 @@ try:
     from recorder import ActionRecorder, get_all_monitors, SCENARIOS_DIR
     from replayer import (ActionReplayer, ActionResult, MultiReplayRunner,
                           REPORTS_DIR)
+    from scheduler import SchedulerRunner
     import stats_db
     import official_log
 except ImportError as e:
     ctk.CTkMessagebox = None
     messagebox.showerror("Import manquant", str(e))
     sys.exit(1)
+
+# Systray (mode automatique) — optionnel, repli sur la barre des tâches si absent
+try:
+    import pystray
+    from PIL import Image as _PILImage, ImageDraw as _PILDraw
+    _HAS_TRAY = True
+except Exception:
+    _HAS_TRAY = False
 
 # Compat : chercher scénarios dans les deux dossiers (migration v3→v4)
 _LEGACY_SESSIONS_DIR = Path("sessions")
@@ -230,7 +246,7 @@ class _ScenarioRow(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("WinGhost RPA v4")
+        self.title("WinGhost RPA v5")
         self.configure(fg_color=_BG)
         self.minsize(1000, 700)
         self._center_window(1060, 740)
@@ -246,6 +262,12 @@ class App(ctk.CTk):
         self._current_run_index  = 0
         self._total_runs_planned = 1
         self._scenario_rows: list[_ScenarioRow] = []
+
+        # Mode automatique (daemon) + systray
+        self._scheduler: SchedulerRunner | None = None
+        self._auto_thread: threading.Thread | None = None
+        self._auto_running = False
+        self._tray_icon = None
 
         stats_db.init_db()
         official_log.init_logs()
@@ -274,7 +296,7 @@ class App(ctk.CTk):
         header.pack(fill="x")
         header.pack_propagate(False)
 
-        ctk.CTkLabel(header, text="🤖  WinGhost RPA v4",
+        ctk.CTkLabel(header, text="🤖  WinGhost RPA v5",
                      font=_FONT_H1, text_color=_ACCENT).pack(
             side="left", padx=20)
 
@@ -324,6 +346,22 @@ class App(ctk.CTk):
         self._scenario_name_entry.pack(side="left", fill="x", expand=True)
         CTkToolTip(self._scenario_name_entry,
                    "Nom du scénario qui sera enregistré")
+
+        # Application cible
+        app_row = ctk.CTkFrame(rec, fg_color="transparent")
+        app_row.pack(fill="x", padx=10, pady=(0, 6))
+        ctk.CTkLabel(app_row, text="App :", font=_FONT_SM,
+                     text_color=_FG2, width=44).pack(side="left")
+        self._target_app_entry = ctk.CTkEntry(
+            app_row, placeholder_text="Ex : Outlook, O…",
+            font=_FONT_SM, fg_color=_BG3, border_color=_BG4,
+            text_color=_FG, height=28,
+        )
+        self._target_app_entry.pack(side="left", fill="x", expand=True)
+        CTkToolTip(self._target_app_entry,
+                   "Nom de l'application ciblée par ce scénario\n"
+                   "Inscrit tel quel dans le journal officiel\n"
+                   "(laisser vide = détection auto du processus actif)")
 
         self._rec_btn = ctk.CTkButton(
             rec, text="  ⬤  RECORD",
@@ -457,11 +495,49 @@ class App(ctk.CTk):
             height=34, corner_radius=8,
             command=self._open_dashboard,
         )
-        self._dashboard_btn.pack(fill="x")
+        self._dashboard_btn.pack(fill="x", pady=(0, 6))
         CTkToolTip(self._dashboard_btn,
                    "Ouvrir le dashboard Flask dans le navigateur\n"
                    f"http://127.0.0.1:{_SERVER_PORT}/\n"
                    "Graphiques, heatmap horaire, export CSV")
+
+        # MODE AUTOMATIQUE (daemon)
+        auto = ctk.CTkFrame(parent, fg_color=_BG2, corner_radius=10)
+        auto.pack(fill="x")
+        ctk.CTkLabel(auto, text="🔁  Mode automatique",
+                     font=_FONT_SM, text_color=_FG2).pack(
+            anchor="w", padx=12, pady=(8, 2))
+
+        ai_row = ctk.CTkFrame(auto, fg_color="transparent")
+        ai_row.pack(fill="x", padx=10, pady=2)
+        ctk.CTkLabel(ai_row, text="Intervalle (min)", font=_FONT_SM,
+                     text_color=_FG2, width=100).pack(side="left")
+        self._auto_interval_var = tk.DoubleVar(value=30.0)
+        ai_entry = ctk.CTkEntry(ai_row, textvariable=self._auto_interval_var,
+                                width=64, height=28, justify="center",
+                                font=_FONT_SM, fg_color=_BG3,
+                                border_color=_BG4, text_color=_FG)
+        ai_entry.pack(side="left", padx=6)
+        CTkToolTip(ai_entry,
+                   "Délai entre deux exécutions automatiques\n"
+                   "Spec métier : 30 minutes")
+
+        self._auto_btn = ctk.CTkButton(
+            auto, text="  ⏱  Démarrer l'automatique",
+            font=_FONT_SM,
+            fg_color=_ACCENT2, hover_color="#C9733F", text_color=_BG,
+            height=34, corner_radius=8,
+            command=self._toggle_auto,
+        )
+        self._auto_btn.pack(fill="x", padx=10, pady=(4, 4))
+        CTkToolTip(self._auto_btn,
+                   "Rejoue le scénario sélectionné en boucle, à intervalle régulier\n"
+                   "La fenêtre se réduit dans la zone de notification (systray)\n"
+                   "Une alerte s'affiche en cas d'échec d'un cycle")
+
+        self._auto_status_lbl = ctk.CTkLabel(
+            auto, text="", font=("Segoe UI", 9), text_color=_ACCENT2)
+        self._auto_status_lbl.pack(anchor="w", padx=12, pady=(0, 8))
 
     # ── Panneau droit ─────────────────────────────────────────────────────────
 
@@ -506,9 +582,12 @@ class App(ctk.CTk):
         self._tabs.add("Stats long-terme")
         self._tabs._segmented_button.configure(font=_FONT_SM)
 
-        # Bind tab change pour rafraîchir les stats
-        self._tabs._segmented_button.bind("<Button-1>",
-                                          lambda e: self.after(100, self._on_tab_changed))
+        # Rafraîchit les stats lors du changement d'onglet
+        try:
+            self._tabs._segmented_button.configure(
+                command=lambda _tab: self.after(100, self._on_tab_changed))
+        except Exception:
+            pass
 
         self._build_journal_tab(self._tabs.tab("Journal"))
         self._build_report_tab(self._tabs.tab("Rapport"))
@@ -813,6 +892,15 @@ class App(ctk.CTk):
         name = self._read_scenario_display_name(path)
         self._status_var.set(f"Scénario : {name}")
         self._log_debug(f"✔ Scénario sélectionné : {name}", "info")
+        # Pré-remplir l'application cible si le scénario en déclare une
+        try:
+            with open(path, encoding="utf-8") as f:
+                tgt = json.load(f).get("target_app", "")
+            if tgt:
+                self._target_app_entry.delete(0, "end")
+                self._target_app_entry.insert(0, tgt)
+        except Exception:
+            pass
 
     def _on_scenario_delete(self, path: Path):
         name = self._read_scenario_display_name(path)
@@ -881,7 +969,8 @@ class App(ctk.CTk):
     def _toggle_record(self):
         if self._recorder is None:
             name = self._scenario_name_entry.get().strip() or ""
-            self._recorder = ActionRecorder(scenario_name=name)
+            target_app = self._target_app_entry.get().strip()
+            self._recorder = ActionRecorder(scenario_name=name, target_app=target_app)
             self._recorder.start()
             self._rec_btn.configure(text="  ■  STOP RECORD",
                                      fg_color=_RED, hover_color="#B04050")
@@ -1044,6 +1133,8 @@ class App(ctk.CTk):
         self._load_official_log()
         self._load_stats_sessions()
         self.after(200, self._refresh_stats_silent)
+        if any(r.status == "error" for r in results):
+            self._show_failure_popup(scenario_name, results)
 
     def _on_multi_all_done(self, all_res, json_path, html_path):
         n = len(all_res)
@@ -1057,6 +1148,13 @@ class App(ctk.CTk):
         self._load_stats_sessions()
         self.after(200, lambda: (self._tabs.set("Stats long-terme"),
                                   self._refresh_stats_silent()))
+        # Alerte si au moins un run du lot a échoué
+        failing = next((run for run in all_res
+                        if any(r.status == "error" for r in run)), None)
+        if failing is not None:
+            scen = (self._read_scenario_display_name(self._session_path)
+                    if self._session_path else "?")
+            self._show_failure_popup(scen, failing)
 
     def _on_replay_finished(self):
         self._replay_btn.configure(state="normal")
@@ -1356,6 +1454,238 @@ class App(ctk.CTk):
             self._log_debug(f"🌐 Dashboard actif → {url}", "info")
             webbrowser.open(url)
 
+    # ── Mode automatique (daemon + systray) ──────────────────────────────────
+
+    def _toggle_auto(self):
+        if self._auto_running:
+            self._stop_auto()
+        else:
+            self._start_auto()
+
+    def _start_auto(self):
+        if not self._session_path or not self._session_path.exists():
+            messagebox.showwarning("Scénario introuvable",
+                                   "Sélectionnez d'abord un scénario à automatiser.")
+            return
+        if self._recorder is not None:
+            messagebox.showwarning("Enregistrement en cours",
+                                   "Arrêtez l'enregistrement avant de lancer le mode automatique.")
+            return
+        try:
+            interval_min = max(0.1, float(self._auto_interval_var.get()))
+        except Exception:
+            interval_min = 30.0
+            self._auto_interval_var.set(30.0)
+
+        scenario_name = self._read_scenario_display_name(self._session_path)
+        self._scheduler = SchedulerRunner(
+            ocr_similarity_min=self._ocr_threshold_var.get(),
+            on_cycle_start=self._on_auto_cycle_start,
+            on_cycle_done=self._on_auto_cycle_done,
+            on_progress=self._on_action_progress,
+            on_wait=self._on_auto_wait,
+        )
+        self._auto_running = True
+        self._auto_btn.configure(text="  ■  Arrêter l'automatique",
+                                 fg_color=_RED, hover_color="#B04050")
+        self._replay_btn.configure(state="disabled")
+        self._rec_btn.configure(state="disabled")
+        self._status_var.set("🔁 Mode automatique actif")
+        self._tabs.set("Journal")
+        self._log_official(
+            f"🔁 Mode automatique démarré — «{scenario_name}» toutes les "
+            f"{interval_min:.0f} min", "head")
+        self._log_debug(
+            f"🔁 Mode automatique : {scenario_name} / cycle {interval_min:.0f} min",
+            "heading")
+
+        self._auto_thread = threading.Thread(
+            target=self._scheduler.run_forever,
+            kwargs={"session_path": self._session_path,
+                    "interval_minutes": interval_min},
+            daemon=True,
+        )
+        self._auto_thread.start()
+        # Réduire dans la zone de notification après le démarrage
+        self.after(500, self._hide_to_tray)
+
+    def _stop_auto(self):
+        if self._scheduler:
+            self._scheduler.stop()
+        self._auto_running = False
+        self._auto_btn.configure(text="  ⏱  Démarrer l'automatique",
+                                 fg_color=_ACCENT2, hover_color="#C9733F")
+        self._replay_btn.configure(
+            state="normal" if self._session_path else "disabled")
+        self._rec_btn.configure(state="normal")
+        self._auto_status_lbl.configure(text="")
+        self._status_var.set("Mode automatique arrêté.")
+        self._log_official("■ Mode automatique arrêté", "warn")
+        self._log_debug("■ Mode automatique arrêté.", "warn")
+        self._remove_tray()
+
+    # callbacks scheduler (appelés depuis le thread daemon → marshalés via after)
+
+    def _on_auto_cycle_start(self, cycle: int):
+        self.after(0, self._auto_cycle_start_ui, cycle)
+
+    def _auto_cycle_start_ui(self, cycle: int):
+        self._run_lbl.configure(text=f"Auto #{cycle}")
+        self._progress_bar.set(0)
+        self._clear_tree()
+        self._log_debug(f"═══ Cycle automatique #{cycle} ═══", "run")
+
+    def _on_auto_cycle_done(self, cycle: int, results, status: str, run_id: int):
+        self.after(0, self._auto_cycle_done_ui, cycle, results, status, run_id)
+
+    def _auto_cycle_done_ui(self, cycle: int, results, status: str, run_id: int):
+        ok    = sum(1 for r in results if getattr(r, "status", "") == "ok")
+        total = len(results)
+        tag = ("ok" if status == official_log.STATUS_SUCCESS
+               else ("warn" if status == official_log.STATUS_PARTIAL else "error"))
+        self._results = results
+        self._log_debug(f"✔ Cycle #{cycle} — {status} — OK {ok}/{total}", tag)
+        self._update_report_summary(results)
+        self._load_official_log()
+        self._load_stats_sessions()
+        self._refresh_stats_silent()
+        if status == official_log.STATUS_FAILURE:
+            name = (self._read_scenario_display_name(self._session_path)
+                    if self._session_path else "?")
+            self._show_failure_popup(name, results, cycle=cycle)
+
+    def _on_auto_wait(self, cycle: int, next_run_epoch: float):
+        nxt = datetime.datetime.fromtimestamp(next_run_epoch).strftime("%H:%M:%S")
+        self.after(0, self._auto_status_lbl.configure,
+                   {"text": f"Cycle #{cycle} terminé · prochain à {nxt}"})
+
+    # systray
+
+    def _make_tray_image(self):
+        img = _PILImage.new("RGB", (64, 64), _BG2)
+        d = _PILDraw.Draw(img)
+        d.ellipse((8, 8, 56, 56), fill=_ACCENT)
+        d.ellipse((22, 24, 31, 33), fill=_BG)
+        d.ellipse((38, 24, 47, 33), fill=_BG)
+        d.rectangle((24, 42, 44, 46), fill=_BG)
+        return img
+
+    def _hide_to_tray(self):
+        if not self._auto_running:
+            return
+        if _HAS_TRAY and self._tray_icon is None:
+            try:
+                self._setup_tray()
+                self.withdraw()
+                return
+            except Exception as e:
+                self._log_debug(f"Systray indisponible : {e}", "warn")
+        # Repli : réduction classique dans la barre des tâches
+        self.iconify()
+
+    def _setup_tray(self):
+        menu = pystray.Menu(
+            pystray.MenuItem("Ouvrir WinGhost", self._tray_restore, default=True),
+            pystray.MenuItem("Arrêter l'automatique", self._tray_stop_auto),
+            pystray.MenuItem("Quitter", self._tray_quit),
+        )
+        self._tray_icon = pystray.Icon(
+            "winghost", self._make_tray_image(),
+            "WinGhost RPA — mode automatique", menu)
+        threading.Thread(target=self._tray_icon.run, daemon=True).start()
+
+    def _tray_restore(self, icon=None, item=None):
+        self.after(0, self._restore_from_tray)
+
+    def _restore_from_tray(self):
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
+
+    def _tray_stop_auto(self, icon=None, item=None):
+        self.after(0, self._stop_auto)
+
+    def _tray_quit(self, icon=None, item=None):
+        self.after(0, self._on_close)
+
+    def _remove_tray(self):
+        if self._tray_icon is not None:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
+            self._tray_icon = None
+        try:
+            self.deiconify()
+        except Exception:
+            pass
+
+    # alerte d'échec
+
+    def _show_failure_popup(self, scenario_name: str, results=None, cycle=None):
+        # Toujours rendre la fenêtre visible avant d'alerter
+        self._restore_from_tray()
+
+        errors = [r for r in (results or []) if getattr(r, "status", "") == "error"]
+        lines = []
+        for r in errors[:6]:
+            lbl = getattr(r, "label", "") or getattr(r, "action_type", "")
+            lines.append(f"#{getattr(r, 'index', '?')}  {lbl} — {getattr(r, 'error', '') or ''}")
+        if len(errors) > 6:
+            lines.append(f"… et {len(errors) - 6} autre(s) erreur(s)")
+        detail = "\n".join(lines) or "Une ou plusieurs actions ont échoué pendant l'exécution."
+
+        cyc = f"  ·  cycle #{cycle}" if cycle is not None else ""
+
+        try:
+            self.bell()
+        except Exception:
+            pass
+
+        pop = ctk.CTkToplevel(self)
+        pop.title("ÉCHEC — WinGhost RPA")
+        pop.configure(fg_color=_RED)
+        pw, ph = 640, 380
+        try:
+            sx = self.winfo_rootx() + (self.winfo_width() - pw) // 2
+            sy = self.winfo_rooty() + (self.winfo_height() - ph) // 2
+            pop.geometry(f"{pw}x{ph}+{max(sx,0)}+{max(sy,0)}")
+        except Exception:
+            pop.geometry(f"{pw}x{ph}")
+        pop.attributes("-topmost", True)
+        pop.lift()
+        try:
+            pop.grab_set()
+        except Exception:
+            pass
+
+        inner = ctk.CTkFrame(pop, fg_color=_BG2, corner_radius=14)
+        inner.pack(fill="both", expand=True, padx=6, pady=6)
+
+        ctk.CTkLabel(inner, text="✘", font=("Segoe UI", 72, "bold"),
+                     text_color=_RED).pack(pady=(18, 0))
+        ctk.CTkLabel(inner, text="ÉCHEC D'EXÉCUTION",
+                     font=("Segoe UI Semibold", 22), text_color=_RED).pack()
+        ctk.CTkLabel(inner, text=f"Scénario : {scenario_name}{cyc}",
+                     font=("Segoe UI", 13), text_color=_FG).pack(pady=(6, 10))
+
+        box = ctk.CTkTextbox(inner, font=_FONT_MONO, fg_color=_BG3,
+                             text_color=_YELLOW, height=110, corner_radius=8)
+        box.pack(fill="x", expand=False, padx=24)
+        box.insert("0.0", detail)
+        box.configure(state="disabled")
+
+        ctk.CTkButton(inner, text="  J'ai compris  ",
+                      font=("Segoe UI Semibold", 14),
+                      fg_color=_RED, hover_color="#B04050", text_color=_BG,
+                      height=42, corner_radius=10,
+                      command=pop.destroy).pack(pady=16)
+
+        self._log_debug(f"⚠ ALERTE ÉCHEC — {scenario_name}{cyc}", "error")
+
     # ── Journaux ──────────────────────────────────────────────────────────────
 
     def _log_debug(self, message: str, tag: str = "info"):
@@ -1395,6 +1725,9 @@ class App(ctk.CTk):
 
     def _on_close(self):
         global _SERVER_PROC
+        if self._scheduler:
+            self._scheduler.stop()
+        self._remove_tray()
         if _SERVER_PROC and _SERVER_PROC.poll() is None:
             _SERVER_PROC.terminate()
         self.destroy()

@@ -92,6 +92,16 @@ td.mono{font-family:var(--mono)}td.label{color:var(--accent2)}
 .actions-bar{display:flex;gap:8px;margin-bottom:20px;align-items:center}
 /* empty */
 .empty{padding:40px;text-align:center;color:var(--fg2)}
+/* info tooltip (bulle d'aide au survol) */
+.tip{position:relative;cursor:help;border-bottom:1px dotted var(--fg2)}
+.tip .info{display:inline-block;width:14px;height:14px;line-height:14px;text-align:center;
+           border-radius:50%;background:var(--bg4);color:var(--accent);font-size:10px;
+           margin-left:4px;font-weight:700}
+.tip:hover::after{content:attr(data-tip);position:absolute;left:0;top:135%;z-index:50;
+           width:max-content;max-width:280px;white-space:normal;background:var(--bg4);
+           color:var(--fg);padding:8px 11px;border-radius:6px;font-size:11.5px;
+           font-weight:400;line-height:1.45;box-shadow:0 4px 18px #000a;
+           border:1px solid var(--accent)}
 """
 
 _CHARTJS_CDN = "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
@@ -201,11 +211,31 @@ def session_detail(session_id: int):
     all_avg_ms   = [r["avg_response_ms"] for r in runs if r.get("avg_response_ms") is not None]
     global_avg   = round(sum(all_avg_ms) / len(all_avg_ms), 1) if all_avg_ms else None
 
+    # Deux métriques de temps distinctes (cf. bulles d'aide)
+    all_e2e      = [r["total_duration_s"] for r in runs if r.get("total_duration_s") is not None]
+    avg_e2e_s    = round(sum(all_e2e) / len(all_e2e), 2) if all_e2e else None
+    all_appms    = [r["app_response_ms"] for r in runs if r.get("app_response_ms") is not None]
+    avg_app_ms   = round(sum(all_appms) / len(all_appms), 1) if all_appms else None
+
+    _TIP_E2E = ("Temps de bout en bout : durée d'horloge réelle entre la première et la "
+                "dernière action du scénario (inclut les pauses, les attentes réseau et "
+                "le temps de réflexion de l'application). C'est la valeur du journal officiel.")
+    _TIP_APP = ("Temps applicatif cumulé : somme des temps de réponse mesurés après chaque "
+                "action (du clic jusqu'au changement d'écran). Mesure la réactivité pure de "
+                "l'application, hors pauses entre actions.")
+
+    e2e_disp = f"{avg_e2e_s:.2f} s" if avg_e2e_s is not None else "—"
+    app_disp = _fmt_ms(avg_app_ms)
+
     cards = f"""
 <div class="cards">
   <div class="card blue"><div class="val">{total_runs}</div><div class="lbl">Runs total</div></div>
   <div class="card ok"><div class="val">{last_ok}</div><div class="lbl">✔ Runs complets</div></div>
-  <div class="card orange"><div class="val">{_fmt_ms(global_avg)}</div><div class="lbl">⏱ Avg global</div></div>
+  <div class="card orange"><div class="val">{_fmt_ms(global_avg)}</div><div class="lbl">⏱ Avg réponse / action</div></div>
+  <div class="card ok"><div class="val">{e2e_disp}</div>
+    <div class="lbl"><span class="tip" data-tip="{_TIP_E2E}">Bout-en-bout (moy)<span class="info">i</span></span></div></div>
+  <div class="card orange"><div class="val">{app_disp}</div>
+    <div class="lbl"><span class="tip" data-tip="{_TIP_APP}">Applicatif cumulé (moy)<span class="info">i</span></span></div></div>
   <div class="card blue"><div class="val">{session["action_count"]}</div><div class="lbl">Actions / session</div></div>
 </div>"""
 
@@ -214,6 +244,8 @@ def session_detail(session_id: int):
     for r in runs:
         pct_ok = (r["ok_count"] * 100 // r["total"]) if r.get("total") else 0
         cls = "ok" if pct_ok == 100 else ("warn" if pct_ok >= 70 else "err")
+        e2e = r.get("total_duration_s")
+        e2e_str = f"{e2e:.2f} s" if e2e is not None else "—"
         run_rows += (
             f'<tr>'
             f'<td class="mono">#{r["run_number"]}</td>'
@@ -224,6 +256,8 @@ def session_detail(session_id: int):
             f'<td class="mono err">{r["error_count"]}</td>'
             f'<td class="mono">{_fmt_ms(r.get("avg_response_ms"))}</td>'
             f'<td class="mono">{_fmt_ms(r.get("max_response_ms"))}</td>'
+            f'<td class="mono ok">{e2e_str}</td>'
+            f'<td class="mono warn">{_fmt_ms(r.get("app_response_ms"))}</td>'
             f'<td><a class="btn btn-secondary" href="/run/{r["id"]}">Détail</a></td>'
             f'</tr>\n'
         )
@@ -235,9 +269,12 @@ def session_detail(session_id: int):
   <thead><tr>
     <th>Run</th><th>Démarré le</th><th>Total</th>
     <th>✔ OK</th><th>⚠ Ignorées</th><th>✘ Erreurs</th>
-    <th>Avg (ms)</th><th>Max (ms)</th><th></th>
+    <th>Avg (ms)</th><th>Max (ms)</th>
+    <th><span class="tip" data-tip="{_TIP_E2E}">Bout-en-bout<span class="info">i</span></span></th>
+    <th><span class="tip" data-tip="{_TIP_APP}">Applicatif<span class="info">i</span></span></th>
+    <th></th>
   </tr></thead>
-  <tbody>{run_rows if run_rows else '<tr><td colspan="9" class="empty">Aucun run.</td></tr>'}</tbody>
+  <tbody>{run_rows if run_rows else '<tr><td colspan="11" class="empty">Aucun run.</td></tr>'}</tbody>
 </table>
 </div>"""
 
@@ -382,6 +419,10 @@ def run_detail(run_id: int):
             f'<img class="ss-thumb" src="data:image/png;base64,{ss}" alt="screenshot">'
             if ss else "—"
         )
+        ocr_v = a.get("ocr_score")
+        ocr_str = f"{ocr_v:.2f}" if ocr_v is not None else "—"
+        vis = a.get("visual_ok")
+        vis_str = "✔" if vis == 1 else ("✘" if vis == 0 else "—")
         rows += (
             f'<tr>'
             f'<td class="mono">{a["action_index"]}</td>'
@@ -389,8 +430,8 @@ def run_detail(run_id: int):
             f'<td class="label">{a.get("label") or "—"}</td>'
             f'<td>{_badge(a.get("status","ok"))}</td>'
             f'<td class="mono">{_fmt_ms(a.get("response_time_ms"))}</td>'
-            f'<td class="mono">{f"{a["ocr_score"]:.2f}" if a.get("ocr_score") is not None else "—"}</td>'
-            f'<td class="mono">{"✔" if a.get("visual_ok")==1 else ("✘" if a.get("visual_ok")==0 else "—")}</td>'
+            f'<td class="mono">{ocr_str}</td>'
+            f'<td class="mono">{vis_str}</td>'
             f'<td>{ss_cell}</td>'
             f'<td class="mono" style="color:var(--red);font-size:11px">{a.get("error_msg") or ""}</td>'
             f'</tr>\n'

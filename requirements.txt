@@ -1,5 +1,5 @@
 # ─── RPA Recorder / Replayer ──────────────────────────────────────────────────
-# Python 3.10+  |  Windows recommandé (PyAutoGUI + pynput natifs)
+# Python 3.10+  |  Windows (PyAutoGUI + pynput + pywin32 natifs)
 
 # Automatisation bureau
 pyautogui>=0.9.54
@@ -12,7 +12,7 @@ easyocr>=1.7.1
 Pillow>=10.0.0
 numpy>=1.24.0
 
-# Multi-moniteurs (optionnel — repli gracieux si absent)
+# Détection multi-moniteurs (clippe les screenshots aux limites de chaque écran)
 screeninfo>=0.8.1
 
 # Dashboard web (v3+)
@@ -21,9 +21,12 @@ flask>=3.0.0
 # Interface graphique moderne (v4)
 customtkinter>=5.2.0
 
-# Capture du nom d'application Windows (v4, optionnel — Windows uniquement)
+# Capture du nom d'application Windows en premier plan (v4)
 pywin32>=306
 psutil>=5.9.0
+
+# Icône de zone de notification pour le mode automatique (v5)
+pystray>=0.19.4
 
 # (optionnel) accélération GPU pour EasyOCR
 # torch>=2.0.0        # décommenter si GPU CUDA disponible
