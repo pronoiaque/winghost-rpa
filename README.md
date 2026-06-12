@@ -1,11 +1,22 @@
-# WinGhost RPA v5
+# WinGhost RPA v6
 
-> Enregistreur / Rejoueur RPA Windows avec ancrage visuel OCR, **mode automatique planifié (systray)**, scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
+> Enregistreur / Rejoueur RPA Windows avec ancrage visuel OCR, **enregistrement des mouvements souris**, **splash screen de démarrage**, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
 
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-5.0.0-green)
+![Version](https://img.shields.io/badge/version-6.0.0-green)
+
+---
+
+## Nouveautés v6
+
+| Fonctionnalité | Description |
+|---|---|
+| 🖱️ **Mouvements souris enregistrés** | Le recorder consigne désormais les déplacements du curseur (action `move`), throttlés (10 FPS max, 15 px min) pour un rejeu fidèle de la trajectoire |
+| 🎯 **Rejeu conditionné à l'OCR** | Les clics et saisies ne sont rejoués **que si** le contexte visuel correspond (score OCR ≥ seuil) ; les `move` sont exécutés directement, sans vérification |
+| ⏳ **Splash screen de démarrage** | Écran d'accueil avec barre de progression pendant le chargement d'EasyOCR (long à initialiser) — la fenêtre principale n'apparaît qu'une fois prêt |
+| ♻️ **Lecteur OCR partagé** | EasyOCR n'est initialisé qu'**une seule fois** au démarrage puis réutilisé par le recorder et le replayer (gain de temps notable) |
 
 ---
 
@@ -39,20 +50,22 @@
 
 ### 1. Enregistrement (`recorder.py`)
 
-L'outil écoute les événements souris et clavier via **pynput**. À chaque clic ou saisie :
+L'outil écoute les événements souris et clavier via **pynput**. Les **déplacements du curseur** sont enregistrés en continu (action `move`), throttlés à 10 FPS max et 15 px min pour limiter le volume. À chaque clic ou saisie :
 
 1. Capture du **nom de l'application** active (processus Windows via pywin32 + psutil)
 2. Screenshot de la région autour du curseur (±160 px, multi-moniteurs)
 3. Reconnaissance OCR (EasyOCR, fr + en) — déduction d'un **label humain** (`"Connexion"`, `"Champ mot de passe"`)
 4. Sauvegarde dans `scenarios/scenario_YYYYMMDD_HHMMSS.json` (v3.0, rétrocompatible v1/v2)
 
+> EasyOCR est initialisé **une seule fois** au démarrage (pendant le splash screen) puis partagé entre le recorder et le replayer.
+
 ### 2. Replay simple (`ActionReplayer`)
 
 Pour chaque action enregistrée :
 
 1. **Vérification OCR** : compare le contexte visuel actuel à celui enregistré (score `difflib`)
-2. Si score < seuil → action ignorée (l'interface a changé)
-3. **Exécution** via PyAutoGUI
+2. Si score < seuil → action ignorée (l'interface a changé) — un clic/saisie n'est rejoué **que si** le contexte visuel correspond
+3. **Exécution** via PyAutoGUI (les `move` sont rejoués directement via `moveTo`, sans vérification ni mesure de réponse)
 4. **Screenshot post-action** : PNG base64 de la région (160 px) autour du clic — toujours capturé
 5. **Mesure du temps de réponse** : polling pixel-à-pixel jusqu'au prochain changement d'écran
 
@@ -198,7 +211,7 @@ winghost-rpa/
 ├── official_log.py      # Log officiel CSV mensuel (app, scénario, durée, statut)
 ├── scheduler.py         # Mode automatique (daemon) : rejoue en boucle toutes les N min
 ├── report_server.py     # Dashboard Flask (Chart.js, export CSV, 2 métriques de temps)
-├── gui.py               # Interface CustomTkinter v5 (+ systray + alerte échec)
+├── gui.py               # Interface CustomTkinter v6 (splash screen + systray + alerte échec)
 ├── requirements.txt     # Dépendances pip
 ├── pyproject.toml       # Métadonnées du projet
 ├── winghost.bat         # Lanceur Windows
@@ -224,6 +237,13 @@ winghost-rpa/
   "actions": [
     {
       "index": 1,
+      "action_type": "move",
+      "timestamp": 1749730319.5,
+      "x": 820, "y": 400,
+      "delay_before": 0.12
+    },
+    {
+      "index": 2,
       "action_type": "click",
       "timestamp": 1749730320.0,
       "x": 850, "y": 420,
@@ -242,6 +262,7 @@ winghost-rpa/
 
 > `target_app` (v5) est facultatif : s'il est renseigné, il prime sur le nom d'application détecté automatiquement dans le journal officiel.
 > Les sessions v1 (`"1.0"`) et v2 (`"2.0"`) restent entièrement compatibles avec le replayer.
+> Les scénarios v6 incluent des actions `"move"` (mouvements souris) sans `visual_context` — rétrocompatibles avec les anciens replayers (action inconnue ignorée).
 
 ---
 

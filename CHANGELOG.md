@@ -5,6 +5,36 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [6.0.0] — 2026-06-12
+
+### Ajouté
+
+#### 🖱️ Enregistrement des mouvements souris (`recorder.py`)
+- Nouvelle action `"move"` : les déplacements du curseur sont consignés dans le scénario JSON
+- Throttling : 10 FPS max (`MOVE_THROTTLE_S = 0.10`) et distance minimum 15 px (`MOVE_MIN_DIST_PX = 15`)
+- Aucun `visual_context` sur les `move` — pas d'OCR, pas de screenshot, taille des scénarios maîtrisée
+- Rejeu via `pyautogui.moveTo(x, y, duration=…)` pour une trajectoire fidèle et naturelle
+
+#### ⏳ Splash screen de démarrage (`gui.py`)
+- Écran d'accueil (480×260 px) affiché dès le lancement, **avant** la fenêtre principale
+- Barre de progression animée pendant le chargement d'EasyOCR avec message de statut en temps réel
+- La fenêtre principale n'est affichée qu'à la fin (`deiconify` après fermeture du splash)
+
+#### ♻️ Lecteur OCR partagé (`reader=`)
+- EasyOCR initialisé **une seule fois** (splash), puis transmis via `reader=` à `ActionRecorder` et `ActionReplayer`
+- Si `reader=None`, chaque classe charge son propre reader (comportement historique préservé)
+
+#### 🎯 Rejeu OCR strict
+- Les `move` s'exécutent directement sans vérification OCR ni mesure de réponse
+- Clics / saisies / touches : conditionnés par le seuil OCR — **uniquement si match**
+
+### Corrigé
+
+#### 🐛 `CTkSegmentedButton.bind()` → `NotImplementedError`
+- Remplacé par `configure(command=lambda _tab: …)`, supporté dans toutes les versions de CustomTkinter
+
+---
+
 ## [5.0.0] — 2026-06-12
 
 ### Ajouté
