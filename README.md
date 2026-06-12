@@ -1,11 +1,22 @@
-# WinGhost RPA v6.1
+# WinGhost RPA v6.2 — CHU Toulouse
 
-> Enregistreur / Rejoueur RPA Windows avec ancrage visuel OCR, **capture de tous les inputs souris** (clics, molette, glisser), enregistrement des mouvements, splash screen de démarrage, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
+> Enregistreur / Rejoueur RPA Windows **aux couleurs du CHU de Toulouse**, avec ancrage visuel OCR, capture de tous les inputs souris (clics, molette, glisser), enregistrement des mouvements, splash screen de démarrage, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
 
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-6.1.0-green)
+![Version](https://img.shields.io/badge/version-6.2.0-green)
+
+---
+
+## Nouveautés v6.2
+
+| Fonctionnalité | Description |
+|---|---|
+| 🎨 **Thème clair CHU Toulouse** | Interface claire institutionnelle : bleu CHU `#0091CE`, vert `#8BC53F`, texte ardoise `#1E2A38`, fonds blanc / `#EDF2F8` — bandeau supérieur bleu CHU |
+| 🐚 **Logo coquille CHU** | Logo « coquille Saint-Jacques » en dégradé bleu→vert (`chu_logo.py` + `assets/logo_chu.svg`), affiché dans l'en-tête, le splash, l'icône de fenêtre et le systray |
+
+> ⚠️ Le logo est une **reconstruction libre** inspirée de l'identité du CHU de Toulouse (la charte officielle n'ayant pu être récupérée automatiquement). Pour un usage officiel, remplacez `assets/logo_chu.svg` / `assets/logo_chu.png` par le fichier de la direction de la communication ; la palette est ajustable dans `chu_logo.COLORS` et l'en-tête de `gui.py`.
 
 ---
 
@@ -220,11 +231,13 @@ winghost-rpa/
 ├── official_log.py      # Log officiel CSV mensuel (app, scénario, durée, statut)
 ├── scheduler.py         # Mode automatique (daemon) : rejoue en boucle toutes les N min
 ├── report_server.py     # Dashboard Flask (Chart.js, export CSV, 2 métriques de temps)
-├── gui.py               # Interface CustomTkinter v6 (splash screen + systray + alerte échec)
+├── gui.py               # Interface CustomTkinter v6.2 (thème clair CHU + logo + splash + systray)
+├── chu_logo.py          # Logo coquille CHU (SVG + rendu Pillow), palette CHU
 ├── requirements.txt     # Dépendances pip
 ├── pyproject.toml       # Métadonnées du projet
 ├── winghost.bat         # Lanceur Windows
 ├── install.bat          # Installateur pip
+├── assets/              # Logo CHU (logo_chu.svg / logo_chu.png)
 ├── scenarios/           # Scénarios JSON enregistrés (v4)
 ├── sessions/            # Sessions JSON v1/v2 (rétrocompatibilité)
 ├── reports/             # Rapports JSON + HTML par run

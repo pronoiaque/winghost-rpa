@@ -5,6 +5,24 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [6.2.0] — 2026-06-12
+
+### Ajouté
+
+#### 🎨 Habillage aux couleurs du CHU de Toulouse
+- **Thème clair institutionnel** : l'interface passe d'un thème sombre à un thème clair fond blanc / gris bleuté, aux couleurs du CHU de Toulouse
+- Palette : bleu CHU `#0091CE`, vert `#8BC53F`, transition teal `#00A99D`, texte ardoise `#1E2A38`, fonds `#FFFFFF` / `#EDF2F8`
+- Bandeau supérieur **bleu CHU** avec texte blanc ; boutons, onglets et accents recolorés en conséquence
+
+#### 🐚 Logo « coquille » CHU (`chu_logo.py` + `assets/logo_chu.svg`)
+- Nouveau module `chu_logo` : génère un logo **coquille Saint-Jacques** en dégradé bleu→vert (SVG scalable + rendu Pillow)
+- Logo affiché dans le **bandeau d'en-tête**, le **splash screen**, l'**icône de fenêtre** (barre des tâches) et l'**icône systray**
+- `assets/logo_chu.svg` (vectoriel) + `assets/logo_chu.png` (raster) livrés ; chargés en priorité s'ils existent
+
+> ⚠️ Le logo fourni est une **reconstruction libre** inspirée de l'identité visuelle du CHU de Toulouse (coquille, dégradé bleu→vert), destinée à l'habillage interne de l'outil. Pour un usage officiel, remplacez `assets/logo_chu.svg` / `assets/logo_chu.png` par le fichier fourni par la direction de la communication. Les codes couleurs exacts de la charte n'ayant pu être récupérés automatiquement, la palette est une approximation fidèle ajustable dans `chu_logo.COLORS` et l'en-tête de `gui.py`.
+
+---
+
 ## [6.1.0] — 2026-06-12
 
 ### Corrigé

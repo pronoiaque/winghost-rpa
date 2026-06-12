@@ -1,6 +1,10 @@
 """
 gui.py — Interface CustomTkinter pour WinGhost RPA.
 
+v6.2 :
+  • Thème clair institutionnel aux couleurs du CHU de Toulouse (bleu → vert)
+  • Logo « coquille » CHU dans le bandeau et le splash (chu_logo + assets/logo_chu.svg)
+
 v6.1 :
   • Seuil OCR par défaut abaissé à 0.25 (réduit les faux négatifs sur les clics)
   • Titre mis à jour : WinGhost RPA v6.1
@@ -45,7 +49,7 @@ from tkinter import filedialog, messagebox, ttk
 
 try:
     import customtkinter as ctk
-    ctk.set_appearance_mode("dark")
+    ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")
 except ImportError:
     print("customtkinter requis : pip install customtkinter", file=sys.stderr)
@@ -56,6 +60,12 @@ try:
     _HAS_EASYOCR = True
 except ImportError:
     _HAS_EASYOCR = False
+
+try:
+    import chu_logo
+    _HAS_LOGO = True
+except Exception:
+    _HAS_LOGO = False
 
 try:
     from recorder import ActionRecorder, get_all_monitors, SCENARIOS_DIR
@@ -81,19 +91,27 @@ except Exception:
 _LEGACY_SESSIONS_DIR = Path("sessions")
 SCENARIOS_DIR_LOCAL  = SCENARIOS_DIR  # Path("scenarios")
 
-# ─── Palette ──────────────────────────────────────────────────────────────────
+# ─── Palette CHU Toulouse — thème clair institutionnel ───────────────────────
+# Couleurs inspirées de l'identité visuelle du CHU de Toulouse (bleu → vert).
 
-_BG        = "#1A1D27"
-_BG2       = "#22263A"
-_BG3       = "#2A2E42"
-_BG4       = "#343850"
-_ACCENT    = "#5B8DEF"
-_ACCENT2   = "#F09058"
-_GREEN     = "#43C59E"
-_RED       = "#E05C6A"
-_YELLOW    = "#E0B84A"
-_FG        = "#D8DEE9"
-_FG2       = "#7B8496"
+_BG        = "#EDF2F8"   # canvas application (gris bleuté très clair)
+_BG2       = "#FFFFFF"   # cartes / panneaux
+_BG3       = "#E3EAF2"   # sous-panneaux, en-têtes de table, survol léger
+_BG4       = "#DCE5EF"   # champs, boutons secondaires
+_ACCENT    = "#0091CE"   # bleu CHU
+_ACCENT2   = "#8BC53F"   # vert CHU (innovation / médical)
+_GREEN     = "#2E9E5B"   # succès
+_RED       = "#D64550"   # erreur
+_YELLOW    = "#D99A1C"   # avertissement
+_FG        = "#1E2A38"   # texte ardoise
+_FG2       = "#5B6B7B"   # texte secondaire
+
+_HEADER     = "#0091CE"  # bandeau supérieur (bleu CHU)
+_HEADER_FG  = "#FFFFFF"  # texte sur le bandeau
+_ON_ACCENT  = "#FFFFFF"  # texte sur boutons colorés
+_SELECT     = "#D6ECF7"  # ligne sélectionnée (bleu très clair)
+_BLUE_DARK  = "#006FA3"  # survol bleu
+_GREEN_DARK = "#6FA82E"  # survol vert
 
 _FONT_MONO = ("Consolas", 9)
 _FONT_UI   = ("Segoe UI", 11)
@@ -180,7 +198,7 @@ class _ScenarioRow(ctk.CTkFrame):
     """Une ligne dans la liste des scénarios : nom + badge runs + boutons."""
 
     _COLOR_NORMAL   = _BG3
-    _COLOR_SELECTED = "#2C3866"
+    _COLOR_SELECTED = _SELECT
 
     def __init__(self, parent, scenario_path: Path, run_count: int,
                  on_select, on_delete, on_rename, **kw):
@@ -232,7 +250,7 @@ class _ScenarioRow(ctk.CTkFrame):
         # Bouton supprimer
         btn_del = ctk.CTkButton(
             self, text="🗑", width=24, height=24,
-            fg_color="transparent", hover_color="#3D1F22",
+            fg_color="transparent", hover_color="#F8D7DA",
             text_color=_RED, font=("Segoe UI", 11),
             command=lambda: on_delete(scenario_path),
         )
@@ -262,10 +280,11 @@ class _ScenarioRow(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("WinGhost RPA v6.1")
+        self.title("CHU Toulouse — WinGhost RPA v6.2")
         self.configure(fg_color=_BG)
         self.minsize(1000, 700)
         self._center_window(1060, 740)
+        self._set_window_icon()
 
         self._ocr_reader = None
         self._recorder: ActionRecorder | None  = None
@@ -314,7 +333,7 @@ class App(ctk.CTk):
         splash.resizable(False, False)
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        w, h = 480, 260
+        w, h = 480, 320
         splash.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
         splash.configure(fg_color=_BG2)
         splash.attributes("-topmost", True)
@@ -324,11 +343,14 @@ class App(ctk.CTk):
             pass
         splash.lift()
 
-        ctk.CTkLabel(splash, text="🤖  WinGhost RPA",
-                     font=("Segoe UI Bold", 26), text_color=_ACCENT).pack(pady=(36, 4))
-        ctk.CTkLabel(splash, text="v6.1 — Robot Process Automation",
+        logo_big = self._get_logo_image(72)
+        if logo_big is not None:
+            ctk.CTkLabel(splash, image=logo_big, text="").pack(pady=(26, 2))
+        ctk.CTkLabel(splash, text="CHU Toulouse — WinGhost RPA",
+                     font=("Segoe UI Bold", 22), text_color=_ACCENT).pack(pady=(2, 2))
+        ctk.CTkLabel(splash, text="v6.2 — Robot Process Automation",
                      font=("Segoe UI", 12), text_color=_FG2).pack()
-        ctk.CTkLabel(splash, text="© WinGhost 2026",
+        ctk.CTkLabel(splash, text="© CHU Toulouse 2026",
                      font=("Segoe UI", 9), text_color=_FG2).pack(side="bottom", pady=10)
 
         frm = ctk.CTkFrame(splash, fg_color="transparent")
@@ -372,23 +394,74 @@ class App(ctk.CTk):
 
     # ── Construction UI ───────────────────────────────────────────────────────
 
+    def _set_window_icon(self):
+        """Définit l'icône de la fenêtre (barre des tâches) avec la coquille CHU."""
+        try:
+            from PIL import Image, ImageTk
+            png = Path("assets/logo_chu.png")
+            if png.exists():
+                pil = Image.open(png).convert("RGBA")
+            elif _HAS_LOGO:
+                pil = chu_logo.render_logo(64)
+            else:
+                return
+            self._icon_photo = ImageTk.PhotoImage(pil)  # référence conservée
+            self.iconphoto(True, self._icon_photo)
+        except Exception:
+            pass
+
+    def _get_logo_image(self, size: int = 34):
+        """Retourne un CTkImage du logo CHU (coquille), mis en cache.
+
+        Charge en priorité assets/logo_chu.png s'il existe (rendu officiel),
+        sinon génère la coquille via chu_logo.render_logo (Pillow).
+        """
+        cache = getattr(self, "_logo_cache", None)
+        if cache is None:
+            cache = self._logo_cache = {}
+        if size in cache:
+            return cache[size]
+        img = None
+        try:
+            from PIL import Image
+            png = Path("assets/logo_chu.png")
+            if png.exists():
+                pil = Image.open(png).convert("RGBA").resize(
+                    (size, size), Image.LANCZOS)
+            elif _HAS_LOGO:
+                pil = chu_logo.render_logo(size)
+            else:
+                pil = None
+            if pil is not None:
+                img = ctk.CTkImage(light_image=pil, dark_image=pil,
+                                   size=(size, size))
+        except Exception:
+            img = None
+        cache[size] = img
+        return img
+
     def _build_ui(self):
         # ── Header ───────────────────────────────────────────────────────────
-        header = ctk.CTkFrame(self, fg_color=_BG2, corner_radius=0, height=52)
+        header = ctk.CTkFrame(self, fg_color=_HEADER, corner_radius=0, height=56)
         header.pack(fill="x")
         header.pack_propagate(False)
 
-        ctk.CTkLabel(header, text="🤖  WinGhost RPA v6.1",
-                     font=_FONT_H1, text_color=_ACCENT).pack(
-            side="left", padx=20)
+        # Logo CHU (coquille) + titre
+        logo_img = self._get_logo_image(34)
+        if logo_img is not None:
+            ctk.CTkLabel(header, image=logo_img, text="").pack(side="left", padx=(16, 8))
+
+        ctk.CTkLabel(header, text="CHU Toulouse  ·  WinGhost RPA v6.2",
+                     font=_FONT_H1, text_color=_HEADER_FG).pack(
+            side="left", padx=(0, 20))
 
         self._monitor_var = tk.StringVar(value="")
         ctk.CTkLabel(header, textvariable=self._monitor_var,
-                     font=_FONT_SM, text_color=_FG2).pack(side="right", padx=16)
+                     font=_FONT_SM, text_color=_HEADER_FG).pack(side="right", padx=16)
 
         self._status_var = tk.StringVar(value="Prêt")
         ctk.CTkLabel(header, textvariable=self._status_var,
-                     font=_FONT_SM, text_color=_FG2).pack(side="right", padx=(0, 10))
+                     font=_FONT_SM, text_color=_HEADER_FG).pack(side="right", padx=(0, 10))
 
         # ── Corps principal ───────────────────────────────────────────────────
         body = ctk.CTkFrame(self, fg_color="transparent")
@@ -448,7 +521,7 @@ class App(ctk.CTk):
         self._rec_btn = ctk.CTkButton(
             rec, text="  ⬤  RECORD",
             font=("Segoe UI Semibold", 12),
-            fg_color=_GREEN, hover_color="#35A07E", text_color=_BG,
+            fg_color=_GREEN, hover_color="#35A07E", text_color=_ON_ACCENT,
             height=36, corner_radius=8,
             command=self._toggle_record,
         )
@@ -547,7 +620,7 @@ class App(ctk.CTk):
         self._replay_btn = ctk.CTkButton(
             parent, text="  ▶  REPLAY",
             font=("Segoe UI Semibold", 12),
-            fg_color=_ACCENT, hover_color="#4070CC", text_color=_BG,
+            fg_color=_ACCENT, hover_color=_BLUE_DARK, text_color=_ON_ACCENT,
             height=38, corner_radius=8,
             state="disabled",
             command=self._start_replay,
@@ -560,7 +633,7 @@ class App(ctk.CTk):
         self._stop_btn = ctk.CTkButton(
             parent, text="  ■  STOP",
             font=("Segoe UI Semibold", 12),
-            fg_color=_RED, hover_color="#B04050", text_color=_BG,
+            fg_color=_RED, hover_color="#B04050", text_color=_ON_ACCENT,
             height=38, corner_radius=8,
             state="disabled",
             command=self._stop_replay,
@@ -607,7 +680,7 @@ class App(ctk.CTk):
         self._auto_btn = ctk.CTkButton(
             auto, text="  ⏱  Démarrer l'automatique",
             font=_FONT_SM,
-            fg_color=_ACCENT2, hover_color="#C9733F", text_color=_BG,
+            fg_color=_ACCENT2, hover_color=_GREEN_DARK, text_color=_ON_ACCENT,
             height=34, corner_radius=8,
             command=self._toggle_auto,
         )
@@ -651,7 +724,7 @@ class App(ctk.CTk):
             fg_color=_BG2,
             segmented_button_fg_color=_BG3,
             segmented_button_selected_color=_ACCENT,
-            segmented_button_selected_hover_color="#4070CC",
+            segmented_button_selected_hover_color=_ACCENT,
             segmented_button_unselected_color=_BG3,
             segmented_button_unselected_hover_color=_BG4,
             text_color=_FG,
@@ -801,8 +874,8 @@ class App(ctk.CTk):
         CTkToolTip(btn_json, "Exporter les résultats du dernier replay en JSON")
 
         btn_html = ctk.CTkButton(foot, text="🌐 HTML", height=28, width=80,
-                                  fg_color=_ACCENT, hover_color="#4070CC",
-                                  text_color=_BG, font=_FONT_SM, corner_radius=6,
+                                  fg_color=_ACCENT, hover_color=_BLUE_DARK,
+                                  text_color=_ON_ACCENT, font=_FONT_SM, corner_radius=6,
                                   command=self._export_report_html)
         btn_html.pack(side="right", padx=(0, 4))
         CTkToolTip(btn_html,
@@ -840,7 +913,7 @@ class App(ctk.CTk):
 
         btn_csv = ctk.CTkButton(top, text="⬇ CSV", height=30, width=70,
                                  fg_color=_GREEN, hover_color="#35A07E",
-                                 text_color=_BG, font=_FONT_SM, corner_radius=6,
+                                 text_color=_ON_ACCENT, font=_FONT_SM, corner_radius=6,
                                  command=self._export_csv)
         btn_csv.pack(side="left", padx=6)
         CTkToolTip(btn_csv,
@@ -1598,7 +1671,7 @@ class App(ctk.CTk):
             self._scheduler.stop()
         self._auto_running = False
         self._auto_btn.configure(text="  ⏱  Démarrer l'automatique",
-                                 fg_color=_ACCENT2, hover_color="#C9733F")
+                                 fg_color=_ACCENT2, hover_color=_GREEN_DARK)
         self._replay_btn.configure(
             state="normal" if self._session_path else "disabled")
         self._rec_btn.configure(state="normal")
@@ -1646,12 +1719,18 @@ class App(ctk.CTk):
     # systray
 
     def _make_tray_image(self):
-        img = _PILImage.new("RGB", (64, 64), _BG2)
+        # Coquille CHU sur fond blanc (repli : pastille bleue)
+        try:
+            if _HAS_LOGO:
+                base = _PILImage.new("RGBA", (64, 64), (255, 255, 255, 255))
+                shell = chu_logo.render_logo(60)
+                base.paste(shell, (2, 2), shell)
+                return base.convert("RGB")
+        except Exception:
+            pass
+        img = _PILImage.new("RGB", (64, 64), "#FFFFFF")
         d = _PILDraw.Draw(img)
         d.ellipse((8, 8, 56, 56), fill=_ACCENT)
-        d.ellipse((22, 24, 31, 33), fill=_BG)
-        d.ellipse((38, 24, 47, 33), fill=_BG)
-        d.rectangle((24, 42, 44, 46), fill=_BG)
         return img
 
     def _hide_to_tray(self):
@@ -1764,7 +1843,7 @@ class App(ctk.CTk):
 
         ctk.CTkButton(inner, text="  J'ai compris  ",
                       font=("Segoe UI Semibold", 14),
-                      fg_color=_RED, hover_color="#B04050", text_color=_BG,
+                      fg_color=_RED, hover_color="#B04050", text_color=_ON_ACCENT,
                       height=42, corner_radius=10,
                       command=pop.destroy).pack(pady=16)
 
