@@ -2,10 +2,16 @@
 recorder.py — Enregistrement des actions utilisateur (clics + saisies)
 avec capture visuelle de la zone cible via EasyOCR.
 
+v4 : ajout du champ `app_name` sur chaque Action (nom de l'application au
+     premier plan au moment de l'action, via win32gui/psutil)
+     + SCENARIOS_DIR pour la sortie des fichiers de scénario
+     + scenario_name paramètre sur ActionRecorder
+     + captures de screenshots toujours activées (padding 160 px)
+
 v2 : ajout du champ `label` (nom humain de la cible déduit de l'OCR)
      + support multi-moniteurs (capture sur l'écran contenant le curseur)
 
-Sortie : session_YYYYMMDD_HHMMSS.json
+Sortie : scenarios/scenario_YYYYMMDD_HHMMSS.json
 """
 
 import json
@@ -29,7 +35,10 @@ from pynput import mouse, keyboard
 SESSIONS_DIR = Path("sessions")
 SESSIONS_DIR.mkdir(exist_ok=True)
 
-SCREENSHOT_PADDING = 80          # px autour du clic pour la capture visuelle
+SCENARIOS_DIR = Path("scenarios")
+SCENARIOS_DIR.mkdir(exist_ok=True)
+
+SCREENSHOT_PADDING = 160         # px autour du clic pour la capture visuelle (wider)
 OCR_LANGUAGES      = ["fr", "en"]
 DOUBLE_CLICK_GAP   = 0.3         # secondes max entre deux clics pour détecter un double-clic
 LABEL_MAX_WORDS    = 4           # nombre max de mots dans un label auto-généré
@@ -39,6 +48,29 @@ logging.basicConfig(
     format="%(asctime)s [RECORDER] %(levelname)s — %(message)s"
 )
 log = logging.getLogger("recorder")
+
+
+# ─── Détection de l'application au premier plan ──────────────────────────────
+
+def get_foreground_app() -> str:
+    """
+    Retourne le nom de l'application au premier plan (sans extension .exe).
+    Utilise win32gui + win32process + psutil.
+    En cas d'erreur (plateforme non Windows, accès refusé, etc.), retourne "".
+    Ne lève jamais d'exception.
+    """
+    try:
+        import win32gui
+        import win32process
+        import psutil
+
+        hwnd = win32gui.GetForegroundWindow()
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        name = psutil.Process(pid).name().removesuffix(".exe")
+        return name
+    except Exception:
+        return ""
+
 
 # ─── Multi-moniteurs ─────────────────────────────────────────────────────────
 
@@ -143,7 +175,7 @@ class VisualContext:
     ocr_text: str                  # texte complet détecté dans la zone
     label: str                     # nom humain court déduit de l'OCR
     screenshot_region: list        # [x, y, w, h]
-    screenshot_b64: Optional[str] = None  # PNG encodé base64 (facultatif)
+    screenshot_b64: Optional[str] = None  # PNG encodé base64
 
 
 @dataclass
@@ -158,13 +190,14 @@ class Action:
     key:            Optional[str]  = None
     visual_context: Optional[dict] = None
     delay_before:   float          = 0.0   # délai depuis l'action précédente (s)
+    app_name:       str            = ""    # nom de l'application au premier plan
 
 
 # ─── Recorder principal ───────────────────────────────────────────────────────
 
 class ActionRecorder:
-    def __init__(self, save_screenshots: bool = False):
-        self.save_screenshots = save_screenshots
+    def __init__(self, scenario_name: str = ""):
+        self._scenario_name = scenario_name
         self.actions: list[Action] = []
         self.recording = False
         self._lock = threading.Lock()
@@ -253,6 +286,7 @@ class ActionRecorder:
             button      = btn_name,
             visual_context = asdict(visual) if visual else None,
             delay_before   = delay,
+            app_name       = get_foreground_app(),
         )
         with self._lock:
             self.actions.append(action)
@@ -296,6 +330,7 @@ class ActionRecorder:
             key         = key_name,
             visual_context = asdict(visual) if visual else None,
             delay_before   = delay,
+            app_name       = get_foreground_app(),
         )
         with self._lock:
             self.actions.append(action)
@@ -322,6 +357,7 @@ class ActionRecorder:
             text        = self._typed_buffer,
             visual_context = asdict(visual) if visual else None,
             delay_before   = delay,
+            app_name       = get_foreground_app(),
         )
         with self._lock:
             self.actions.append(action)
@@ -350,11 +386,11 @@ class ActionRecorder:
                 screenshot_region= region,
             )
 
-            if self.save_screenshots:
-                import base64, io
-                buf = io.BytesIO()
-                img.save(buf, format="PNG")
-                ctx.screenshot_b64 = base64.b64encode(buf.getvalue()).decode()
+            # Toujours capturer le screenshot (comportement v4)
+            import base64, io
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            ctx.screenshot_b64 = base64.b64encode(buf.getvalue()).decode()
 
             return ctx
 
@@ -378,14 +414,16 @@ class ActionRecorder:
 
     def _save_session(self) -> Path:
         ts   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = SESSIONS_DIR / f"session_{ts}.json"
+        stem = f"scenario_{ts}"
+        path = SCENARIOS_DIR / f"{stem}.json"
 
         with self._lock:
             data = {
-                "version":    "2.0",
-                "recorded_at": ts,
-                "action_count": len(self.actions),
-                "actions": [asdict(a) for a in self.actions],
+                "version":        "3.0",
+                "scenario_name":  self._scenario_name or stem,
+                "recorded_at":    ts,
+                "action_count":   len(self.actions),
+                "actions":        [asdict(a) for a in self.actions],
             }
 
         with open(path, "w", encoding="utf-8") as f:
@@ -398,12 +436,16 @@ class ActionRecorder:
 
 def main():
     import sys
-    recorder = ActionRecorder(save_screenshots="--screenshots" in sys.argv)
+    scenario_name = ""
+    for arg in sys.argv[1:]:
+        if arg.startswith("--name="):
+            scenario_name = arg.split("=", 1)[1]
+    recorder = ActionRecorder(scenario_name=scenario_name)
     recorder.start()
     print("Enregistrement en cours… Appuyez sur ENTRÉE pour arrêter.")
     input()
     session_path = recorder.stop()
-    print(f"Session sauvegardée : {session_path}")
+    print(f"Scénario sauvegardé : {session_path}")
 
 
 if __name__ == "__main__":

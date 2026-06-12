@@ -1,9 +1,16 @@
 """
 replayer.py — Replay de session avec vérification OCR et mesure de timing.
 
-v3 :
+v4 :
+  • Screenshots TOUJOURS capturés (paramètre capture_screenshots supprimé)
+  • SCREENSHOT_REGION_PAD = 160 px (était 120)
+  • write_official_log() : écrit dans le journal officiel CSV après chaque run
+  • save_to_db() appelle automatiquement write_official_log()
+  • _last_session : dernier dict de session chargé (pour scenario_name)
+  • SCENARIOS_DIR listé en plus de SESSIONS_DIR pour les fichiers scénario
+
+v3 (conservé) :
   • MultiReplayRunner : N runs consécutifs d'une même session, avec intervalle configurable
-  • Capture de screenshot après chaque action (optionnel, base64 PNG)
   • Persistance des résultats dans SQLite via stats_db
   • ActionResult enrichi : screenshot_b64, response_time_ms (en ms en plus de s)
   • save_report() génère JSON + HTML + persiste en DB en une passe
@@ -16,6 +23,7 @@ v2 (conservé) :
 """
 
 import base64
+import collections
 import datetime
 import difflib
 import io
@@ -33,10 +41,12 @@ from PIL import Image
 
 from recorder import screenshot_region, derive_label
 import stats_db
+import official_log
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 SESSIONS_DIR           = Path("sessions")
+SCENARIOS_DIR          = Path("scenarios")
 REPORTS_DIR            = Path("reports")
 REPORTS_DIR.mkdir(exist_ok=True)
 
@@ -48,7 +58,7 @@ SCREEN_DIFF_THRESHOLD  = 0.005
 SCREENSHOT_PADDING     = 80
 ACTION_DELAY_MIN       = 0.05
 PYAUTOGUI_PAUSE        = 0.1
-SCREENSHOT_REGION_PAD  = 120   # padding plus large pour le screenshot post-action
+SCREENSHOT_REGION_PAD  = 160   # padding plus large pour le screenshot post-action
 
 pyautogui.PAUSE    = PYAUTOGUI_PAUSE
 pyautogui.FAILSAFE = True
@@ -64,13 +74,15 @@ log = logging.getLogger("replayer")
 
 class ActionResult:
     def __init__(self, index: int, action_type: str, timestamp: float,
-                 label: str = "", x: Optional[int] = None, y: Optional[int] = None):
+                 label: str = "", x: Optional[int] = None, y: Optional[int] = None,
+                 app_name: str = ""):
         self.index            = index
         self.action_type      = action_type
         self.timestamp        = timestamp
         self.label            = label
         self.x                = x
         self.y                = y
+        self.app_name         = app_name
         self.ocr_match        = None   # float | None
         self.visual_ok        = None   # bool | None
         self.skipped          = False
@@ -100,6 +112,7 @@ class ActionResult:
             "label":            self.label,
             "x":                self.x,
             "y":                self.y,
+            "app_name":         self.app_name,
             "ocr_match_score":  round(self.ocr_match, 3) if self.ocr_match is not None else None,
             "visual_ok":        self.visual_ok,
             "skipped":          self.skipped,
@@ -118,14 +131,13 @@ class ActionReplayer:
     def __init__(
         self,
         ocr_similarity_min: float = OCR_SIMILARITY_MIN,
-        capture_screenshots: bool = False,
         on_progress: Optional[Callable[[int, int, "ActionResult"], None]] = None,
     ):
         self.ocr_similarity_min  = ocr_similarity_min
-        self.capture_screenshots = capture_screenshots
         self.on_progress         = on_progress
         self._results: list[ActionResult] = []
         self._stop_event = threading.Event()
+        self._last_session: dict = {}
 
         log.info("Initialisation EasyOCR…")
         self._reader = easyocr.Reader(OCR_LANGUAGES, gpu=False, verbose=False)
@@ -135,7 +147,9 @@ class ActionReplayer:
 
     def load_session(self, path: Path) -> dict:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            session = json.load(f)
+        self._last_session = session
+        return session
 
     def replay(self, session: dict) -> list[ActionResult]:
         self._results = []
@@ -186,13 +200,98 @@ class ActionReplayer:
 
         return json_path
 
+    def write_official_log(self, session_path: Path, scenario_name: str = "") -> None:
+        """
+        Écrit une entrée dans le journal officiel CSV (official_log.py).
+
+        - Calcule la durée depuis les timestamps t_action_sent du premier/dernier résultat.
+        - Détermine le statut : SUCCÈS si tout ok, PARTIEL si seulement des skips, ÉCHEC si erreur.
+        - Récupère app_name depuis le résultat le plus fréquent (Counter sur valeurs non vides).
+        - Utilise scenario_name fourni en paramètre, ou issu de self._last_session, ou le stem.
+        """
+        if not self._results:
+            return
+
+        # Durée : du premier au dernier t_action_sent (ou timestamp)
+        times = [r.t_action_sent for r in self._results if r.t_action_sent is not None]
+        if len(times) >= 2:
+            duration_s = round(times[-1] - times[0], 3)
+        elif len(times) == 1:
+            duration_s = 0.0
+        else:
+            # fallback sur les timestamps enregistrés
+            ts_list = [r.timestamp for r in self._results if r.timestamp]
+            duration_s = round(ts_list[-1] - ts_list[0], 3) if len(ts_list) >= 2 else 0.0
+
+        # Statut
+        has_error = any(r.status == "error" for r in self._results)
+        has_skip  = any(r.status == "skip"  for r in self._results)
+        if has_error:
+            status = official_log.STATUS_FAILURE
+        elif has_skip:
+            status = official_log.STATUS_PARTIAL
+        else:
+            status = official_log.STATUS_SUCCESS
+
+        ok_count    = sum(1 for r in self._results if r.status == "ok")
+        total_count = len(self._results)
+
+        # app_name : valeur la plus fréquente parmi les non-vides
+        app_names = [r.app_name for r in self._results if getattr(r, "app_name", "")]
+        if app_names:
+            counter  = collections.Counter(app_names)
+            app_name = counter.most_common(1)[0][0]
+        else:
+            app_name = ""
+
+        # scenario_name : paramètre > session dict > stem du fichier
+        if not scenario_name:
+            scenario_name = self._last_session.get("scenario_name", "") or session_path.stem
+
+        # run_id : on obtient le dernier run_id depuis stats_db si disponible
+        # (appelé après save_to_db, donc on relit le dernier run de la session)
+        run_id = 0
+        try:
+            stats_db.init_db()
+            fp = str(session_path.resolve())
+            rows = stats_db.get_all_sessions()
+            for s in rows:
+                if s.get("filepath") == fp:
+                    runs = stats_db.get_session_runs(s["id"])
+                    if runs:
+                        run_id = runs[-1]["id"]
+                    break
+        except Exception:
+            pass
+
+        execution_date = datetime.datetime.now().isoformat(timespec="seconds")
+
+        try:
+            official_log.append_entry(
+                app_name       = app_name,
+                scenario_name  = scenario_name,
+                execution_date = execution_date,
+                duration_s     = duration_s,
+                status         = status,
+                ok_count       = ok_count,
+                total_count    = total_count,
+                run_id         = run_id,
+            )
+            log.info("Journal officiel mis à jour (statut=%s, run_id=%d).", status, run_id)
+        except Exception as e:
+            log.warning("Impossible d'écrire dans le journal officiel : %s", e)
+
     def save_to_db(self, session_path: Path) -> int:
         """Persiste le dernier replay dans SQLite. Retourne le run_id."""
         stats_db.init_db()
+
+        scenario_name = self._last_session.get("scenario_name", "") or session_path.stem
+
         session_id = stats_db.upsert_session(
             filepath=str(session_path.resolve()),
             name=session_path.stem,
             action_count=len(self._results),
+            scenario_name=scenario_name,
         )
         run_number = stats_db.next_run_number(session_id)
         started_at = datetime.datetime.now().isoformat(timespec="seconds")
@@ -200,6 +299,10 @@ class ActionReplayer:
 
         times = [r.response_time_ms for r in self._results if r.response_time_ms is not None]
         now   = datetime.datetime.now().isoformat(timespec="seconds")
+
+        # Durée totale pour finish_run
+        t_times = [r.t_action_sent for r in self._results if r.t_action_sent is not None]
+        total_duration_s = round(t_times[-1] - t_times[0], 3) if len(t_times) >= 2 else None
 
         for r in self._results:
             stats_db.insert_action_result(
@@ -216,6 +319,7 @@ class ActionReplayer:
                 error_msg=r.error,
                 screenshot_b64=r.screenshot_b64,
                 replayed_at=now,
+                app_name=getattr(r, "app_name", ""),
             )
 
         stats_db.finish_run(
@@ -227,9 +331,14 @@ class ActionReplayer:
             errors=sum(1 for r in self._results if r.status == "error"),
             avg_ms=round(sum(times) / len(times), 1) if times else None,
             max_ms=round(max(times), 1) if times else None,
+            total_duration_s=total_duration_s,
         )
         log.info("Run #%d persisté en DB (session_id=%d, run_id=%d).",
                  run_number, session_id, run_id)
+
+        # Écriture dans le journal officiel
+        self.write_official_log(session_path, scenario_name=scenario_name)
+
         return run_id
 
     # ── Génération rapport ────────────────────────────────────────────────────
@@ -361,7 +470,7 @@ td.status{{font-weight:700}}
     <tbody>{rows_html}</tbody>
   </table>
 </div>
-<div class="footer">Généré par WinGhost RPA v3 — {replayed_at}</div>
+<div class="footer">Généré par WinGhost RPA v4 — {replayed_at}</div>
 <script>
 (function(){{
   const data={chart_json};
@@ -435,6 +544,7 @@ td.status{{font-weight:700}}
             label       = label,
             x           = raw.get("x"),
             y           = raw.get("y"),
+            app_name    = raw.get("app_name", ""),
         )
 
         delay = max(raw.get("delay_before", 0), ACTION_DELAY_MIN)
@@ -475,8 +585,8 @@ td.status{{font-weight:700}}
         log.info("[%d/%d] #%d (%s) %r exécuté.",
                  i+1, total, result.index, result.action_type, label)
 
-        # Screenshot post-action
-        if self.capture_screenshots and result.x is not None and result.y is not None:
+        # Screenshot post-action — toujours capturé (v4)
+        if result.x is not None and result.y is not None:
             result.screenshot_b64 = self._capture_screenshot(result.x, result.y)
 
         # Mesure du temps de réponse
@@ -582,14 +692,12 @@ class MultiReplayRunner:
     def __init__(
         self,
         ocr_similarity_min:  float = OCR_SIMILARITY_MIN,
-        capture_screenshots: bool  = False,
         on_run_start: Optional[Callable[[int, int], None]] = None,
         on_run_done:  Optional[Callable[[int, int, list[ActionResult]], None]] = None,
         on_progress:  Optional[Callable[[int, int, ActionResult], None]] = None,
         stop_event:   Optional[threading.Event] = None,
     ):
         self.ocr_similarity_min  = ocr_similarity_min
-        self.capture_screenshots = capture_screenshots
         self.on_run_start        = on_run_start
         self.on_run_done         = on_run_done
         self.on_progress         = on_progress
@@ -622,7 +730,6 @@ class MultiReplayRunner:
 
             replayer = ActionReplayer(
                 ocr_similarity_min=self.ocr_similarity_min,
-                capture_screenshots=self.capture_screenshots,
                 on_progress=self.on_progress,
             )
             replayer._stop_event = self._stop_event
@@ -672,15 +779,18 @@ def main():
             interval = float(a.split("=", 1)[1])
 
     if session_path is None:
-        sessions = sorted(SESSIONS_DIR.glob("session_*.json"))
-        if not sessions:
-            print("Aucune session trouvée dans", SESSIONS_DIR)
+        # Cherche d'abord dans scenarios/, puis sessions/
+        candidates = sorted(SCENARIOS_DIR.glob("scenario_*.json")) if SCENARIOS_DIR.exists() else []
+        if not candidates:
+            candidates = sorted(SESSIONS_DIR.glob("session_*.json")) if SESSIONS_DIR.exists() else []
+        if not candidates:
+            print("Aucune session trouvée dans", SCENARIOS_DIR, "ni", SESSIONS_DIR)
             sys.exit(1)
-        session_path = sessions[-1]
+        session_path = candidates[-1]
         print(f"Dernière session : {session_path}")
 
     if n_runs == 1:
-        rep      = ActionReplayer(capture_screenshots=True)
+        rep      = ActionReplayer()
         session  = rep.load_session(session_path)
         rep.replay(session)
         json_p   = rep.save_report(session_path)
@@ -688,7 +798,7 @@ def main():
         print(f"Rapport → {json_p}")
     else:
         print(f"Multi-run : {n_runs} × {session_path.name} — intervalle {interval}s")
-        runner = MultiReplayRunner(capture_screenshots=True)
+        runner = MultiReplayRunner()
         runner.run_n_times(session_path, n=n_runs, interval_s=interval)
         print(f"Runs terminés. Run IDs : {runner.run_ids}")
 

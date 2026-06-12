@@ -1,13 +1,13 @@
 """
-stats_db.py — Stockage SQLite multi-runs pour WinGhost RPA v3.
+stats_db.py — Stockage SQLite multi-runs pour WinGhost RPA v4.
 
 Schéma :
-  sessions       → une entrée par fichier session JSON
-  runs           → N runs par session (run_number, started_at, stats résumées)
-  action_results → résultats détaillés par action (label, timing ms, screenshot_b64)
+  sessions       → une entrée par fichier session JSON (+ scenario_name)
+  runs           → N runs par session (run_number, started_at, stats résumées, total_duration_s)
+  action_results → résultats détaillés par action (label, timing ms, screenshot_b64, app_name)
 
 API publique :
-  init_db()             — crée les tables si elles n'existent pas
+  init_db()             — crée les tables si elles n'existent pas + migration colonnes manquantes
   upsert_session(...)   → session_id
   insert_run(...)       → run_id
   finish_run(...)       — clôture un run avec les stats agrégées
@@ -15,9 +15,9 @@ API publique :
   get_all_sessions()    → list[dict]
   get_session_runs(session_id) → list[dict]
   get_run_actions(run_id)      → list[dict]
-  get_label_stats(session_id)  → list[dict]  (avg/max/min ms + success rate par label)
+  get_label_stats(session_id)  → list[dict]  (avg/max/min ms + success rate + app_name par label)
   get_hourly_stats(session_id) → list[dict]  (avg ms par heure de la journée)
-  export_csv(session_id)       → str  (CSV complet)
+  export_csv(session_id)       → str  (CSV complet, inclut app_name et scenario_name)
 """
 
 import csv
@@ -31,25 +31,27 @@ DB_PATH = Path("winghost_stats.db")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    name         TEXT    NOT NULL,
-    filepath     TEXT    NOT NULL UNIQUE,
-    action_count INTEGER DEFAULT 0,
-    created_at   TEXT    NOT NULL
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL,
+    filepath      TEXT    NOT NULL UNIQUE,
+    action_count  INTEGER DEFAULT 0,
+    created_at    TEXT    NOT NULL,
+    scenario_name TEXT    DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS runs (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      INTEGER NOT NULL REFERENCES sessions(id),
-    run_number      INTEGER NOT NULL,
-    started_at      TEXT    NOT NULL,
-    ended_at        TEXT,
-    total           INTEGER DEFAULT 0,
-    ok_count        INTEGER DEFAULT 0,
-    skip_count      INTEGER DEFAULT 0,
-    error_count     INTEGER DEFAULT 0,
-    avg_response_ms REAL,
-    max_response_ms REAL
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id       INTEGER NOT NULL REFERENCES sessions(id),
+    run_number       INTEGER NOT NULL,
+    started_at       TEXT    NOT NULL,
+    ended_at         TEXT,
+    total            INTEGER DEFAULT 0,
+    ok_count         INTEGER DEFAULT 0,
+    skip_count       INTEGER DEFAULT 0,
+    error_count      INTEGER DEFAULT 0,
+    avg_response_ms  REAL,
+    max_response_ms  REAL,
+    total_duration_s REAL
 );
 
 CREATE TABLE IF NOT EXISTS action_results (
@@ -66,7 +68,8 @@ CREATE TABLE IF NOT EXISTS action_results (
     status           TEXT,           -- 'ok' | 'skip' | 'error'
     error_msg        TEXT,
     screenshot_b64   TEXT,           -- PNG base64 (nullable, peut être volumineux)
-    replayed_at      TEXT NOT NULL   -- ISO datetime pour l'analyse heure-par-heure
+    replayed_at      TEXT NOT NULL,  -- ISO datetime pour l'analyse heure-par-heure
+    app_name         TEXT DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_results_run    ON action_results(run_id);
@@ -74,6 +77,23 @@ CREATE INDEX IF NOT EXISTS idx_runs_session   ON runs(session_id);
 CREATE INDEX IF NOT EXISTS idx_results_label  ON action_results(label);
 CREATE INDEX IF NOT EXISTS idx_results_status ON action_results(status);
 """
+
+
+# ─── Migration ────────────────────────────────────────────────────────────────
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """
+    Ajoute les colonnes manquantes dans les DBs existantes créées avant v4.
+    Idempotent : ne fait rien si la colonne est déjà présente.
+    """
+    for table, col, typedef in [
+        ("sessions",       "scenario_name",   "TEXT DEFAULT ''"),
+        ("runs",           "total_duration_s", "REAL"),
+        ("action_results", "app_name",         "TEXT DEFAULT ''"),
+    ]:
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if col not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}")
 
 
 # ─── Connexion ────────────────────────────────────────────────────────────────
@@ -89,11 +109,13 @@ def _conn(db_path: Path = DB_PATH) -> sqlite3.Connection:
 def init_db(db_path: Path = DB_PATH) -> None:
     with _conn(db_path) as c:
         c.executescript(_SCHEMA)
+        _migrate(c)
 
 
 # ─── Écriture ─────────────────────────────────────────────────────────────────
 
 def upsert_session(filepath: str, name: str, action_count: int,
+                   scenario_name: str = "",
                    db_path: Path = DB_PATH) -> int:
     with _conn(db_path) as c:
         row = c.execute(
@@ -101,14 +123,16 @@ def upsert_session(filepath: str, name: str, action_count: int,
         ).fetchone()
         if row:
             c.execute(
-                "UPDATE sessions SET action_count = ?, name = ? WHERE id = ?",
-                (action_count, name, row["id"]),
+                "UPDATE sessions SET action_count = ?, name = ?, scenario_name = ? WHERE id = ?",
+                (action_count, name, scenario_name, row["id"]),
             )
             return int(row["id"])
         cur = c.execute(
-            "INSERT INTO sessions (name, filepath, action_count, created_at) VALUES (?,?,?,?)",
+            "INSERT INTO sessions (name, filepath, action_count, created_at, scenario_name) "
+            "VALUES (?,?,?,?,?)",
             (name, filepath, action_count,
-             datetime.datetime.now().isoformat(timespec="seconds")),
+             datetime.datetime.now().isoformat(timespec="seconds"),
+             scenario_name),
         )
         return int(cur.lastrowid)
 
@@ -135,14 +159,17 @@ def insert_run(session_id: int, run_number: int, started_at: str,
 def finish_run(run_id: int, ended_at: str,
                total: int, ok: int, skip: int, errors: int,
                avg_ms: Optional[float], max_ms: Optional[float],
+               total_duration_s: Optional[float] = None,
                db_path: Path = DB_PATH) -> None:
     with _conn(db_path) as c:
         c.execute(
             """UPDATE runs
                SET ended_at=?, total=?, ok_count=?, skip_count=?,
-                   error_count=?, avg_response_ms=?, max_response_ms=?
+                   error_count=?, avg_response_ms=?, max_response_ms=?,
+                   total_duration_s=?
                WHERE id=?""",
-            (ended_at, total, ok, skip, errors, avg_ms, max_ms, run_id),
+            (ended_at, total, ok, skip, errors, avg_ms, max_ms,
+             total_duration_s, run_id),
         )
 
 
@@ -160,6 +187,7 @@ def insert_action_result(
     error_msg: Optional[str],
     screenshot_b64: Optional[str],
     replayed_at: str,
+    app_name: str = "",
     db_path: Path = DB_PATH,
 ) -> None:
     visual_int = None if visual_ok is None else (1 if visual_ok else 0)
@@ -168,11 +196,11 @@ def insert_action_result(
             """INSERT INTO action_results
                (run_id, action_index, action_type, label, x, y, ocr_score,
                 visual_ok, response_time_ms, status, error_msg,
-                screenshot_b64, replayed_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                screenshot_b64, replayed_at, app_name)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (run_id, action_index, action_type, label, x, y, ocr_score,
              visual_int, response_time_ms, status, error_msg,
-             screenshot_b64, replayed_at),
+             screenshot_b64, replayed_at, app_name),
         )
 
 
@@ -182,9 +210,9 @@ def get_all_sessions(db_path: Path = DB_PATH) -> list[dict]:
     with _conn(db_path) as c:
         rows = c.execute(
             """SELECT s.*,
-                      COUNT(r.id)          AS run_count,
+                      COUNT(r.id)            AS run_count,
                       AVG(r.avg_response_ms) AS global_avg_ms,
-                      MAX(r.started_at)    AS last_run_at
+                      MAX(r.started_at)      AS last_run_at
                FROM sessions s
                LEFT JOIN runs r ON r.session_id = s.id
                GROUP BY s.id
@@ -226,24 +254,25 @@ def get_run_actions(run_id: int, db_path: Path = DB_PATH) -> list[dict]:
 
 
 def get_label_stats(session_id: int, db_path: Path = DB_PATH) -> list[dict]:
-    """Stats par label à travers tous les runs d'une session."""
+    """Stats par label à travers tous les runs d'une session, avec app_name."""
     with _conn(db_path) as c:
         rows = c.execute(
             """SELECT
                   ar.label,
                   ar.action_type,
-                  COUNT(*)                                              AS run_count,
-                  ROUND(AVG(ar.response_time_ms), 1)                   AS avg_ms,
-                  ROUND(MAX(ar.response_time_ms), 1)                   AS max_ms,
-                  ROUND(MIN(ar.response_time_ms), 1)                   AS min_ms,
+                  MAX(ar.app_name)                                       AS app_name,
+                  COUNT(*)                                               AS run_count,
+                  ROUND(AVG(ar.response_time_ms), 1)                    AS avg_ms,
+                  ROUND(MAX(ar.response_time_ms), 1)                    AS max_ms,
+                  ROUND(MIN(ar.response_time_ms), 1)                    AS min_ms,
                   ROUND(
                       SUM(CASE WHEN ar.status='ok' THEN 1.0 ELSE 0 END)
                       * 100.0 / COUNT(*), 1
-                  )                                                     AS success_rate
+                  )                                                      AS success_rate
                FROM action_results ar
                JOIN runs r ON ar.run_id = r.id
                WHERE r.session_id = ?
-               GROUP BY ar.label
+               GROUP BY ar.label, ar.action_type
                ORDER BY avg_ms DESC""",
             (session_id,),
         ).fetchall()
@@ -308,11 +337,13 @@ def export_csv(session_id: int, db_path: Path = DB_PATH) -> str:
     with _conn(db_path) as c:
         rows = c.execute(
             """SELECT
+                  s.scenario_name,
                   r.run_number,
                   r.started_at       AS run_started_at,
                   ar.action_index,
                   ar.action_type,
                   ar.label,
+                  ar.app_name,
                   ar.x,
                   ar.y,
                   ar.response_time_ms,
@@ -322,6 +353,7 @@ def export_csv(session_id: int, db_path: Path = DB_PATH) -> str:
                   ar.replayed_at
                FROM action_results ar
                JOIN runs r ON ar.run_id = r.id
+               JOIN sessions s ON r.session_id = s.id
                WHERE r.session_id = ?
                ORDER BY r.run_number, ar.action_index""",
             (session_id,),
@@ -330,8 +362,9 @@ def export_csv(session_id: int, db_path: Path = DB_PATH) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow([
-        "run_number", "run_started_at", "action_index", "action_type",
-        "label", "x", "y", "response_time_ms", "ocr_score",
+        "scenario_name", "run_number", "run_started_at",
+        "action_index", "action_type", "label", "app_name",
+        "x", "y", "response_time_ms", "ocr_score",
         "status", "error_msg", "replayed_at",
     ])
     for row in rows:
