@@ -25,6 +25,9 @@ customtkinter>=5.2.0
 pywin32>=306
 psutil>=5.9.0
 
+# Icône de zone de notification pour le mode automatique (v5)
+pystray>=0.19.4
+
 # (optionnel) accélération GPU pour EasyOCR
 # torch>=2.0.0        # décommenter si GPU CUDA disponible
 # torchvision>=0.15.0

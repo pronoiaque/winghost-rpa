@@ -1,6 +1,11 @@
 """
 replayer.py — Replay de session avec vérification OCR et mesure de timing.
 
+v5 :
+  • app_response_ms : temps applicatif cumulé (somme des temps de réponse)
+    persisté en plus de total_duration_s (temps de bout en bout horloge)
+  • write_official_log() : priorité au champ target_app du scénario pour app_name
+
 v4 :
   • Screenshots TOUJOURS capturés (paramètre capture_screenshots supprimé)
   • SCREENSHOT_REGION_PAD = 160 px (était 120)
@@ -236,13 +241,14 @@ class ActionReplayer:
         ok_count    = sum(1 for r in self._results if r.status == "ok")
         total_count = len(self._results)
 
-        # app_name : valeur la plus fréquente parmi les non-vides
-        app_names = [r.app_name for r in self._results if getattr(r, "app_name", "")]
-        if app_names:
-            counter  = collections.Counter(app_names)
-            app_name = counter.most_common(1)[0][0]
-        else:
-            app_name = ""
+        # app_name : application cible déclarée dans le scénario (prioritaire),
+        # sinon valeur la plus fréquente capturée parmi les actions.
+        app_name = self._last_session.get("target_app", "") or ""
+        if not app_name:
+            app_names = [r.app_name for r in self._results if getattr(r, "app_name", "")]
+            if app_names:
+                counter  = collections.Counter(app_names)
+                app_name = counter.most_common(1)[0][0]
 
         # scenario_name : paramètre > session dict > stem du fichier
         if not scenario_name:
@@ -300,9 +306,12 @@ class ActionReplayer:
         times = [r.response_time_ms for r in self._results if r.response_time_ms is not None]
         now   = datetime.datetime.now().isoformat(timespec="seconds")
 
-        # Durée totale pour finish_run
+        # Durée totale (bout en bout, horloge murale) pour finish_run
         t_times = [r.t_action_sent for r in self._results if r.t_action_sent is not None]
         total_duration_s = round(t_times[-1] - t_times[0], 3) if len(t_times) >= 2 else None
+
+        # Temps applicatif cumulé : somme des temps de réponse mesurés
+        app_response_ms = round(sum(times), 1) if times else None
 
         for r in self._results:
             stats_db.insert_action_result(
@@ -332,6 +341,7 @@ class ActionReplayer:
             avg_ms=round(sum(times) / len(times), 1) if times else None,
             max_ms=round(max(times), 1) if times else None,
             total_duration_s=total_duration_s,
+            app_response_ms=app_response_ms,
         )
         log.info("Run #%d persisté en DB (session_id=%d, run_id=%d).",
                  run_number, session_id, run_id)

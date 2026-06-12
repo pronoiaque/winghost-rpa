@@ -2,6 +2,9 @@
 recorder.py — Enregistrement des actions utilisateur (clics + saisies)
 avec capture visuelle de la zone cible via EasyOCR.
 
+v5 : ajout du champ `target_app` au niveau du scénario (nom d'application
+     ciblée, saisi par l'utilisateur, inscrit tel quel dans le journal officiel)
+
 v4 : ajout du champ `app_name` sur chaque Action (nom de l'application au
      premier plan au moment de l'action, via win32gui/psutil)
      + SCENARIOS_DIR pour la sortie des fichiers de scénario
@@ -196,8 +199,9 @@ class Action:
 # ─── Recorder principal ───────────────────────────────────────────────────────
 
 class ActionRecorder:
-    def __init__(self, scenario_name: str = ""):
+    def __init__(self, scenario_name: str = "", target_app: str = ""):
         self._scenario_name = scenario_name
+        self._target_app = target_app
         self.actions: list[Action] = []
         self.recording = False
         self._lock = threading.Lock()
@@ -421,6 +425,7 @@ class ActionRecorder:
             data = {
                 "version":        "3.0",
                 "scenario_name":  self._scenario_name or stem,
+                "target_app":     self._target_app,
                 "recorded_at":    ts,
                 "action_count":   len(self.actions),
                 "actions":        [asdict(a) for a in self.actions],
@@ -437,10 +442,13 @@ class ActionRecorder:
 def main():
     import sys
     scenario_name = ""
+    target_app = ""
     for arg in sys.argv[1:]:
         if arg.startswith("--name="):
             scenario_name = arg.split("=", 1)[1]
-    recorder = ActionRecorder(scenario_name=scenario_name)
+        elif arg.startswith("--app="):
+            target_app = arg.split("=", 1)[1]
+    recorder = ActionRecorder(scenario_name=scenario_name, target_app=target_app)
     recorder.start()
     print("Enregistrement en cours… Appuyez sur ENTRÉE pour arrêter.")
     input()

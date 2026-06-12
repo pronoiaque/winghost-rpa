@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS runs (
     error_count      INTEGER DEFAULT 0,
     avg_response_ms  REAL,
     max_response_ms  REAL,
-    total_duration_s REAL
+    total_duration_s REAL,           -- temps de bout en bout (horloge murale)
+    app_response_ms  REAL            -- temps applicatif cumulé (somme des réponses)
 );
 
 CREATE TABLE IF NOT EXISTS action_results (
@@ -89,6 +90,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for table, col, typedef in [
         ("sessions",       "scenario_name",   "TEXT DEFAULT ''"),
         ("runs",           "total_duration_s", "REAL"),
+        ("runs",           "app_response_ms",  "REAL"),
         ("action_results", "app_name",         "TEXT DEFAULT ''"),
     ]:
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -160,16 +162,17 @@ def finish_run(run_id: int, ended_at: str,
                total: int, ok: int, skip: int, errors: int,
                avg_ms: Optional[float], max_ms: Optional[float],
                total_duration_s: Optional[float] = None,
+               app_response_ms: Optional[float] = None,
                db_path: Path = DB_PATH) -> None:
     with _conn(db_path) as c:
         c.execute(
             """UPDATE runs
                SET ended_at=?, total=?, ok_count=?, skip_count=?,
                    error_count=?, avg_response_ms=?, max_response_ms=?,
-                   total_duration_s=?
+                   total_duration_s=?, app_response_ms=?
                WHERE id=?""",
             (ended_at, total, ok, skip, errors, avg_ms, max_ms,
-             total_duration_s, run_id),
+             total_duration_s, app_response_ms, run_id),
         )
 
 
@@ -340,6 +343,8 @@ def export_csv(session_id: int, db_path: Path = DB_PATH) -> str:
                   s.scenario_name,
                   r.run_number,
                   r.started_at       AS run_started_at,
+                  r.total_duration_s,
+                  r.app_response_ms,
                   ar.action_index,
                   ar.action_type,
                   ar.label,
@@ -363,6 +368,7 @@ def export_csv(session_id: int, db_path: Path = DB_PATH) -> str:
     writer = csv.writer(buf)
     writer.writerow([
         "scenario_name", "run_number", "run_started_at",
+        "total_duration_s", "app_response_ms",
         "action_index", "action_type", "label", "app_name",
         "x", "y", "response_time_ms", "ocr_score",
         "status", "error_msg", "replayed_at",

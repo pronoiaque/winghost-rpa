@@ -1,11 +1,23 @@
-# WinGhost RPA v4
+# WinGhost RPA v5
 
-> Enregistreur / Rejoueur RPA Windows avec ancrage visuel OCR, scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
+> Enregistreur / Rejoueur RPA Windows avec ancrage visuel OCR, **mode automatique planifié (systray)**, scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
 
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-4.0.0-green)
+![Version](https://img.shields.io/badge/version-5.0.0-green)
+
+---
+
+## Nouveautés v5
+
+| Fonctionnalité | Description |
+|---|---|
+| 🔁 **Mode automatique** | Rejoue un scénario en boucle à intervalle régulier (**30 min par défaut**) — répond à la spec « tourner toutes les 30 mins » |
+| 📥 **Réduction en systray** | Pendant l'automatique, la fenêtre se réduit dans la zone de notification ; un clic sur l'icône la restaure |
+| 🚨 **Alerte sur échec** | Gros popup rouge plein écran dès qu'un cycle se solde par un `ÉCHEC`, avec le détail des actions fautives |
+| 🎯 **Application cible** | Champ texte où l'on saisit le nom de l'application visée — inscrit tel quel dans le journal officiel |
+| ⏱️ **Deux métriques de temps** | Dashboard : **bout-en-bout** (horloge réelle) **et applicatif cumulé** (réactivité pure), chacune avec une bulle d'aide explicative |
 
 ---
 
@@ -97,7 +109,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-> **Windows uniquement** : `pywin32` et `psutil` capturent le nom de l'application active ; `screeninfo` clippe les screenshots aux limites de chaque moniteur. Tous trois sont désormais des dépendances standard.
+> **Windows uniquement** : `pywin32` et `psutil` capturent le nom de l'application active ; `screeninfo` clippe les screenshots aux limites de chaque moniteur ; `pystray` gère l'icône de zone de notification du mode automatique. Toutes sont des dépendances standard.
 
 ---
 
@@ -113,13 +125,22 @@ python gui.py
 
 ### Workflow typique
 
-1. Saisissez un **nom de scénario** en haut à gauche (ex : `"Connexion admin"`)
+1. Saisissez un **nom de scénario** et, optionnellement, le **nom de l'application cible**
 2. Cliquez **RECORD** → effectuez votre scénario → **STOP RECORD**
 3. La session apparaît dans la liste des scénarios
 4. Réglez le **nombre de répétitions** (1–99) et l'**intervalle** entre les runs (secondes)
 5. Cliquez **REPLAY** → WinGhost exécute, mesure, persiste tout en DB et log officiel
 6. Consultez l'onglet **Journal** (officiel en 1er, debug en sous-onglet) ou **Stats long-terme**
 7. Renommez ou supprimez un scénario via les boutons ✎ / 🗑 dans la liste
+
+### Mode automatique (surveillance planifiée)
+
+1. Sélectionnez le scénario à surveiller
+2. Réglez l'**intervalle en minutes** (par défaut **30**, conformément à la spec métier)
+3. Cliquez **⏱ Démarrer l'automatique** → WinGhost rejoue le scénario en boucle
+4. La fenêtre se **réduit dans la zone de notification** (systray) ; un clic sur l'icône la restaure
+5. À chaque cycle : persistance DB + ligne dans le journal officiel
+6. En cas d'**échec**, un **gros popup rouge** s'affiche avec le détail des actions fautives
 
 ### Gestion des scénarios
 
@@ -129,14 +150,17 @@ python gui.py
 ### Ligne de commande
 
 ```bash
-# Enregistrer
-python recorder.py
+# Enregistrer (avec nom et application cible)
+python recorder.py --name="Connexion O" --app="Outlook"
 
 # Rejouer la dernière session (1 fois)
 python replayer.py
 
 # Rejouer une session précise 5 fois avec 30 s d'intervalle
 python replayer.py scenarios/scenario_20260612_143200.json --runs=5 --interval=30
+
+# Mode automatique : rejouer en boucle toutes les 30 min (Ctrl+C pour arrêter)
+python scheduler.py scenarios/scenario_20260612_143200.json --interval-min=30
 
 # Dashboard web seul (sans GUI)
 python report_server.py [--port=8080]
@@ -172,8 +196,9 @@ winghost-rpa/
 ├── replayer.py          # Rejoueur : simple, multi-run, screenshots, persistance DB + log officiel
 ├── stats_db.py          # Couche SQLite : sessions / runs / action_results
 ├── official_log.py      # Log officiel CSV mensuel (app, scénario, durée, statut)
-├── report_server.py     # Dashboard Flask (Chart.js, export CSV)
-├── gui.py               # Interface CustomTkinter v4
+├── scheduler.py         # Mode automatique (daemon) : rejoue en boucle toutes les N min
+├── report_server.py     # Dashboard Flask (Chart.js, export CSV, 2 métriques de temps)
+├── gui.py               # Interface CustomTkinter v5 (+ systray + alerte échec)
 ├── requirements.txt     # Dépendances pip
 ├── pyproject.toml       # Métadonnées du projet
 ├── winghost.bat         # Lanceur Windows
@@ -193,6 +218,7 @@ winghost-rpa/
 {
   "version": "3.0",
   "scenario_name": "Connexion admin",
+  "target_app": "Outlook",
   "recorded_at": "20260612_143200",
   "action_count": 12,
   "actions": [
@@ -214,7 +240,8 @@ winghost-rpa/
 }
 ```
 
-> Les sessions v1 (`"1.0"`) et v2 (`"2.0"`) sont entièrement compatibles avec le replayer v4.
+> `target_app` (v5) est facultatif : s'il est renseigné, il prime sur le nom d'application détecté automatiquement dans le journal officiel.
+> Les sessions v1 (`"1.0"`) et v2 (`"2.0"`) restent entièrement compatibles avec le replayer.
 
 ---
 
@@ -222,13 +249,22 @@ winghost-rpa/
 
 ```
 sessions        id · name · scenario_name · filepath · action_count · created_at
-runs            id · session_id · run_number · started_at · ended_at · total_duration_s
+runs            id · session_id · run_number · started_at · ended_at
                 total · ok_count · skip_count · error_count
                 avg_response_ms · max_response_ms
+                total_duration_s   ← temps bout-en-bout (horloge réelle)
+                app_response_ms    ← temps applicatif cumulé (somme des réponses)
 action_results  id · run_id · action_index · action_type · label · app_name · x · y
                 ocr_score · visual_ok · response_time_ms · status
                 error_msg · screenshot_b64 · replayed_at
 ```
+
+### Deux métriques de temps
+
+| Métrique | Définition | Où la voir |
+|---|---|---|
+| **Bout-en-bout** (`total_duration_s`) | Durée d'horloge réelle entre la 1ʳᵉ et la dernière action — inclut pauses et attentes applicatives. C'est la valeur du journal officiel. | Dashboard (carte + colonne), bulle d'info |
+| **Applicatif cumulé** (`app_response_ms`) | Somme des temps de réponse mesurés après chaque action — réactivité pure de l'application. | Dashboard (carte + colonne), bulle d'info |
 
 ---
 
@@ -266,6 +302,7 @@ Chaque rapport HTML standalone inclut :
 | `numpy` | Comparaison pixel-à-pixel |
 | `customtkinter` | Interface graphique moderne (v4) |
 | `flask` | Dashboard web dynamique |
+| `pystray` | Icône de zone de notification du mode automatique (v5) |
 | `pywin32` | Capture du nom d'application Windows en premier plan |
 | `psutil` | Résolution du nom de processus depuis le PID |
 | `screeninfo` | Détection multi-moniteurs (clipping des screenshots) |
