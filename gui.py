@@ -1,6 +1,11 @@
 """
 gui.py — Interface CustomTkinter pour WinGhost RPA.
 
+v6 :
+  • Splash screen au démarrage avec préchargement EasyOCR en arrière-plan
+  • Lecteur OCR partagé (`_ocr_reader`) transmis au recorder et au replayer
+  • Titre mis à jour : WinGhost RPA v6
+
 v5 :
   • Mode automatique (daemon) : rejoue un scénario en boucle (30 min par défaut)
   • Réduction dans la zone de notification (systray) pendant l'automatique
@@ -27,6 +32,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -40,6 +46,12 @@ try:
 except ImportError:
     print("customtkinter requis : pip install customtkinter", file=sys.stderr)
     sys.exit(1)
+
+try:
+    import easyocr as _easyocr
+    _HAS_EASYOCR = True
+except ImportError:
+    _HAS_EASYOCR = False
 
 try:
     from recorder import ActionRecorder, get_all_monitors, SCENARIOS_DIR
@@ -246,11 +258,12 @@ class _ScenarioRow(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("WinGhost RPA v5")
+        self.title("WinGhost RPA v6")
         self.configure(fg_color=_BG)
         self.minsize(1000, 700)
         self._center_window(1060, 740)
 
+        self._ocr_reader = None
         self._recorder: ActionRecorder | None  = None
         self._replayer: ActionReplayer | None  = None
         self._multi_runner: MultiReplayRunner | None = None
@@ -271,10 +284,12 @@ class App(ctk.CTk):
 
         stats_db.init_db()
         official_log.init_logs()
+        self.withdraw()           # caché jusqu'à la fin du splash
         self._build_ui()
         self._refresh_scenario_list()
         self.after(300, self._update_monitor_status)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(20, self._show_splash)
 
     # ── Centrage ──────────────────────────────────────────────────────────────
 
@@ -288,6 +303,69 @@ class App(ctk.CTk):
             x = y = 100
         self.geometry(f"{w}x{h}+{x}+{y}")
 
+    def _show_splash(self):
+        """Affiche le splash screen et précharge EasyOCR en arrière-plan."""
+        splash = ctk.CTkToplevel(self)
+        splash.title("WinGhost RPA")
+        splash.resizable(False, False)
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        w, h = 480, 260
+        splash.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+        splash.configure(fg_color=_BG2)
+        splash.attributes("-topmost", True)
+        try:
+            splash.overrideredirect(True)
+        except Exception:
+            pass
+        splash.lift()
+
+        ctk.CTkLabel(splash, text="🤖  WinGhost RPA",
+                     font=("Segoe UI Bold", 26), text_color=_ACCENT).pack(pady=(36, 4))
+        ctk.CTkLabel(splash, text="v6 — Robot Process Automation",
+                     font=("Segoe UI", 12), text_color=_FG2).pack()
+        ctk.CTkLabel(splash, text="© WinGhost 2026",
+                     font=("Segoe UI", 9), text_color=_FG2).pack(side="bottom", pady=10)
+
+        frm = ctk.CTkFrame(splash, fg_color="transparent")
+        frm.pack(fill="x", padx=48, pady=(24, 0))
+        status_lbl = ctk.CTkLabel(frm, text="Démarrage…", font=_FONT_SM,
+                                   text_color=_FG2, anchor="w")
+        status_lbl.pack(fill="x", pady=(0, 6))
+        bar = ctk.CTkProgressBar(frm, fg_color=_BG3, progress_color=_ACCENT,
+                                  mode="indeterminate", height=6)
+        bar.pack(fill="x")
+        bar.start()
+
+        def _step(text: str, done: bool = False):
+            try:
+                splash.after(0, lambda: status_lbl.configure(text=text))
+                if done:
+                    splash.after(0, bar.stop)
+                    splash.after(0, lambda: bar.configure(mode="determinate"))
+                    splash.after(0, lambda: bar.set(1.0))
+            except Exception:
+                pass
+
+        def _load():
+            _step("Initialisation EasyOCR…")
+            if _HAS_EASYOCR:
+                self._ocr_reader = _easyocr.Reader(
+                    ["fr", "en"], gpu=False, verbose=False)
+            _step("EasyOCR prêt ✓", done=True)
+            time.sleep(0.5)
+            self.after(0, _done)
+
+        def _done():
+            try:
+                splash.destroy()
+            except Exception:
+                pass
+            self.deiconify()
+            self.lift()
+
+        threading.Thread(target=_load, daemon=True).start()
+
     # ── Construction UI ───────────────────────────────────────────────────────
 
     def _build_ui(self):
@@ -296,7 +374,7 @@ class App(ctk.CTk):
         header.pack(fill="x")
         header.pack_propagate(False)
 
-        ctk.CTkLabel(header, text="🤖  WinGhost RPA v5",
+        ctk.CTkLabel(header, text="🤖  WinGhost RPA v6",
                      font=_FONT_H1, text_color=_ACCENT).pack(
             side="left", padx=20)
 
@@ -970,7 +1048,8 @@ class App(ctk.CTk):
         if self._recorder is None:
             name = self._scenario_name_entry.get().strip() or ""
             target_app = self._target_app_entry.get().strip()
-            self._recorder = ActionRecorder(scenario_name=name, target_app=target_app)
+            self._recorder = ActionRecorder(scenario_name=name, target_app=target_app,
+                                             reader=self._ocr_reader)
             self._recorder.start()
             self._rec_btn.configure(text="  ■  STOP RECORD",
                                      fg_color=_RED, hover_color="#B04050")
@@ -1025,6 +1104,7 @@ class App(ctk.CTk):
             self._replayer = ActionReplayer(
                 ocr_similarity_min=self._ocr_threshold_var.get(),
                 on_progress=self._on_action_progress,
+                reader=self._ocr_reader,
             )
             session = self._replayer.load_session(self._session_path)
             self._total_actions = len(session.get("actions", []))

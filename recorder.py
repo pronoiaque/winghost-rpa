@@ -2,6 +2,9 @@
 recorder.py — Enregistrement des actions utilisateur (clics + saisies)
 avec capture visuelle de la zone cible via EasyOCR.
 
+v6 : enregistrement des mouvements souris (action "move", throttlé)
+     + paramètre `reader` pour réutiliser un lecteur OCR déjà chargé
+
 v5 : ajout du champ `target_app` au niveau du scénario (nom d'application
      ciblée, saisi par l'utilisateur, inscrit tel quel dans le journal officiel)
 
@@ -45,6 +48,8 @@ SCREENSHOT_PADDING = 160         # px autour du clic pour la capture visuelle (w
 OCR_LANGUAGES      = ["fr", "en"]
 DOUBLE_CLICK_GAP   = 0.3         # secondes max entre deux clics pour détecter un double-clic
 LABEL_MAX_WORDS    = 4           # nombre max de mots dans un label auto-généré
+MOVE_THROTTLE_S  = 0.10   # intervalle min entre deux mouvements enregistrés (s)
+MOVE_MIN_DIST_PX = 15     # distance min (px) pour enregistrer un mouvement
 
 logging.basicConfig(
     level=logging.INFO,
@@ -199,7 +204,7 @@ class Action:
 # ─── Recorder principal ───────────────────────────────────────────────────────
 
 class ActionRecorder:
-    def __init__(self, scenario_name: str = "", target_app: str = ""):
+    def __init__(self, scenario_name: str = "", target_app: str = "", reader=None):
         self._scenario_name = scenario_name
         self._target_app = target_app
         self.actions: list[Action] = []
@@ -212,10 +217,17 @@ class ActionRecorder:
         self._last_key_time: float = 0.0
         self._mouse_listener  = None
         self._keyboard_listener = None
+        self._last_move_time: float = 0.0
+        self._last_move_x:    int   = 0
+        self._last_move_y:    int   = 0
 
-        log.info("Initialisation EasyOCR (langues : %s)…", OCR_LANGUAGES)
-        self._reader = easyocr.Reader(OCR_LANGUAGES, gpu=False, verbose=False)
-        log.info("EasyOCR prêt.")
+        if reader is not None:
+            log.info("Utilisation du lecteur OCR partagé.")
+            self._reader = reader
+        else:
+            log.info("Initialisation EasyOCR (langues : %s)…", OCR_LANGUAGES)
+            self._reader = easyocr.Reader(OCR_LANGUAGES, gpu=False, verbose=False)
+            log.info("EasyOCR prêt.")
 
     # ── Contrôle ──────────────────────────────────────────────────────────────
 
@@ -227,6 +239,7 @@ class ActionRecorder:
         self._typed_buffer = ""
 
         self._mouse_listener = mouse.Listener(
+            on_move=self._on_move,
             on_click=self._on_click
         )
         self._keyboard_listener = keyboard.Listener(
@@ -298,6 +311,28 @@ class ActionRecorder:
                  action.index, action_type, x, y,
                  visual.label if visual else "",
                  visual.ocr_text[:60] if visual else "")
+
+    def _on_move(self, x: int, y: int):
+        if not self.recording:
+            return
+        t = time.time()
+        dt   = t - self._last_move_time
+        dist = ((x - self._last_move_x) ** 2 + (y - self._last_move_y) ** 2) ** 0.5
+        if dt < MOVE_THROTTLE_S or dist < MOVE_MIN_DIST_PX:
+            return
+        self._last_move_time = t
+        self._last_move_x    = x
+        self._last_move_y    = y
+        delay = self._compute_delay(t)
+        action = Action(
+            index       = self._next_index(),
+            action_type = "move",
+            timestamp   = t,
+            x=x, y=y,
+            delay_before=delay,
+        )
+        with self._lock:
+            self.actions.append(action)
 
     # ── Handlers clavier ──────────────────────────────────────────────────────
 

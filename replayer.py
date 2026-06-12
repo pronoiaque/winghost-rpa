@@ -1,6 +1,9 @@
 """
 replayer.py — Replay de session avec vérification OCR et mesure de timing.
 
+v6 : gestion de l'action "move" (déplacement souris throttlé depuis le recorder)
+     + paramètre `reader` pour réutiliser un lecteur OCR partagé
+
 v5 :
   • app_response_ms : temps applicatif cumulé (somme des temps de réponse)
     persisté en plus de total_duration_s (temps de bout en bout horloge)
@@ -137,6 +140,7 @@ class ActionReplayer:
         self,
         ocr_similarity_min: float = OCR_SIMILARITY_MIN,
         on_progress: Optional[Callable[[int, int, "ActionResult"], None]] = None,
+        reader=None,
     ):
         self.ocr_similarity_min  = ocr_similarity_min
         self.on_progress         = on_progress
@@ -144,9 +148,13 @@ class ActionReplayer:
         self._stop_event = threading.Event()
         self._last_session: dict = {}
 
-        log.info("Initialisation EasyOCR…")
-        self._reader = easyocr.Reader(OCR_LANGUAGES, gpu=False, verbose=False)
-        log.info("EasyOCR prêt.")
+        if reader is not None:
+            log.info("Utilisation du lecteur OCR partagé.")
+            self._reader = reader
+        else:
+            log.info("Initialisation EasyOCR…")
+            self._reader = easyocr.Reader(OCR_LANGUAGES, gpu=False, verbose=False)
+            log.info("EasyOCR prêt.")
 
     # ── API publique ──────────────────────────────────────────────────────────
 
@@ -560,6 +568,16 @@ td.status{{font-weight:700}}
         delay = max(raw.get("delay_before", 0), ACTION_DELAY_MIN)
         time.sleep(delay)
 
+        # Mouvements souris : exécution directe, pas de vérification OCR
+        if raw.get("action_type") == "move":
+            if raw.get("x") is not None and raw.get("y") is not None:
+                try:
+                    pyautogui.moveTo(raw["x"], raw["y"], duration=max(delay * 0.4, 0.02))
+                except Exception:
+                    pass
+            result.t_action_sent = time.time()
+            return result
+
         # Vérification visuelle OCR
         if visual_ctx and visual_ctx.get("ocr_text"):
             ok, score = self._verify_visual(
@@ -669,6 +687,9 @@ td.status{{font-weight:700}}
                 "f5": "f5", "f6": "f6", "f7": "f7", "f8": "f8",
             }
             pyautogui.press(key_map.get(raw.get("key", ""), raw.get("key", "")))
+        elif atype == "move":
+            if x is not None and y is not None:
+                pyautogui.moveTo(x, y, duration=0.05)
         else:
             raise ValueError(f"Type d'action inconnu : {atype!r}")
 
