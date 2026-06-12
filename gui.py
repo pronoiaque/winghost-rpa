@@ -1,21 +1,22 @@
 """
-gui.py — Interface Tkinter pour enregistrer et rejouer des sessions.
+gui.py — Interface CustomTkinter pour WinGhost RPA.
 
-v3 :
-  • Multi-run : spinner « Répétitions » (1–99) + champ « Intervalle (s) »
-  • Capture de screenshots post-action (option replay)
-  • Onglet « Stats long-terme » : historique des runs depuis la DB
-  • Bouton « 🌐 Dashboard Web » (ouvre report_server.py dans un subprocess)
-  • Export CSV direct depuis l'onglet Stats
+v4 :
+  • Migration Tkinter → CustomTkinter (thème dark moderne, coins arrondis)
+  • Bulles d'aide (CTkToolTip) sur tous les boutons et contrôles
+  • Sessions → Scénarios avec noms éditables (rename + delete)
+  • Journal Officiel (une ligne par exécution) + Log Debug (toggle)
+  • Screenshots toujours activés (plus d'option checkbox)
+  • Onglet Stats long-terme corrigé et rafraîchi en temps réel
+  • Capture du nom de l'application pour chaque run
+  • Multi-run : spinner répétitions + intervalle
 
-v2 (conservé) :
-  • Bouton RECORD / STOP, liste de sessions, seuil OCR
-  • Journal temps réel coloré, onglet Rapport avec Treeview
-  • Export JSON / HTML avec graphique SVG, support multi-moniteurs
+v3 conservé : multi-run, SQLite, rapport HTML/SVG, dashboard Flask
 """
 
 import datetime
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -26,67 +27,216 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 try:
-    from recorder import ActionRecorder, get_all_monitors
-    from replayer import (ActionReplayer, ActionResult, MultiReplayRunner,
-                          SESSIONS_DIR, REPORTS_DIR)
-    import stats_db
-except ImportError as e:
-    import tkinter.messagebox as _mb
-    _mb.showerror("Import manquant", str(e))
+    import customtkinter as ctk
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+except ImportError:
+    print("customtkinter requis : pip install customtkinter", file=sys.stderr)
     sys.exit(1)
+
+try:
+    from recorder import ActionRecorder, get_all_monitors, SCENARIOS_DIR
+    from replayer import (ActionReplayer, ActionResult, MultiReplayRunner,
+                          REPORTS_DIR)
+    import stats_db
+    import official_log
+except ImportError as e:
+    ctk.CTkMessagebox = None
+    messagebox.showerror("Import manquant", str(e))
+    sys.exit(1)
+
+# Compat : chercher scénarios dans les deux dossiers (migration v3→v4)
+_LEGACY_SESSIONS_DIR = Path("sessions")
+SCENARIOS_DIR_LOCAL  = SCENARIOS_DIR  # Path("scenarios")
 
 # ─── Palette ──────────────────────────────────────────────────────────────────
 
-BG        = "#1C1F26"
-BG2       = "#252932"
-BG3       = "#2E3440"
-BG4       = "#353B4A"
-ACCENT    = "#5E9BF0"
-ACCENT2   = "#F0965E"
-GREEN     = "#4EC9A0"
-RED       = "#E06C75"
-YELLOW    = "#E5C07B"
-FG        = "#D8DEE9"
-FG2       = "#7B8496"
-FONT_MONO = ("Consolas", 9)
-FONT_UI   = ("Segoe UI", 10)
-FONT_H1   = ("Segoe UI Semibold", 13)
+_BG        = "#1A1D27"
+_BG2       = "#22263A"
+_BG3       = "#2A2E42"
+_BG4       = "#343850"
+_ACCENT    = "#5B8DEF"
+_ACCENT2   = "#F09058"
+_GREEN     = "#43C59E"
+_RED       = "#E05C6A"
+_YELLOW    = "#E0B84A"
+_FG        = "#D8DEE9"
+_FG2       = "#7B8496"
 
-_SERVER_PORT  = 5000
-_SERVER_PROC  = None   # subprocess du dashboard web
+_FONT_MONO = ("Consolas", 9)
+_FONT_UI   = ("Segoe UI", 11)
+_FONT_SM   = ("Segoe UI", 10)
+_FONT_H1   = ("Segoe UI Semibold", 14)
 
-
-# ─── Utilitaires ──────────────────────────────────────────────────────────────
-
-def center_window_on_primary(win: tk.Tk, w: int = 980, h: int = 700):
-    monitors = get_all_monitors()
-    m = monitors[0]
-    x = m["left"] + (m["width"]  - w) // 2
-    y = m["top"]  + (m["height"] - h) // 2
-    win.geometry(f"{w}x{h}+{x}+{y}")
+_SERVER_PORT = 5000
+_SERVER_PROC = None
 
 
-def monitor_summary() -> str:
-    monitors = get_all_monitors()
-    if len(monitors) == 1:
-        m = monitors[0]
-        return f"1 écran  {m['width']}×{m['height']}"
-    return f"{len(monitors)} écrans  " + "  +  ".join(f"{m['width']}×{m['height']}" for m in monitors)
+# ─── Tooltip ──────────────────────────────────────────────────────────────────
+
+class CTkToolTip:
+    """Bulle d'aide légère compatible avec tous les widgets CTk/Tk."""
+    _delay = 600  # ms avant apparition
+
+    def __init__(self, widget: tk.BaseWidget, text: str):
+        self._widget  = widget
+        self._text    = text
+        self._popup   = None
+        self._job     = None
+        widget.bind("<Enter>",   self._on_enter, add="+")
+        widget.bind("<Leave>",   self._on_leave, add="+")
+        widget.bind("<ButtonPress>", self._on_leave, add="+")
+
+    def _on_enter(self, event):
+        self._job = self._widget.after(self._delay, self._show, event)
+
+    def _on_leave(self, _event=None):
+        if self._job:
+            self._widget.after_cancel(self._job)
+            self._job = None
+        if self._popup:
+            self._popup.destroy()
+            self._popup = None
+
+    def _show(self, event):
+        x = self._widget.winfo_rootx() + 20
+        y = self._widget.winfo_rooty() + self._widget.winfo_height() + 4
+        self._popup = tk.Toplevel(self._widget)
+        self._popup.wm_overrideredirect(True)
+        self._popup.wm_geometry(f"+{x}+{y}")
+        self._popup.wm_attributes("-topmost", True)
+        frm = tk.Frame(self._popup, background=_BG3,
+                       highlightthickness=1, highlightbackground=_ACCENT)
+        frm.pack()
+        tk.Label(frm, text=self._text, background=_BG3, foreground=_FG,
+                 font=("Segoe UI", 9), padx=10, pady=5,
+                 wraplength=280, justify="left").pack()
+
+
+# ─── Spinbox custom ───────────────────────────────────────────────────────────
+
+class _Spinbox(ctk.CTkFrame):
+    def __init__(self, parent, from_=1, to=99, initial=1, width=120, **kw):
+        super().__init__(parent, fg_color="transparent", **kw)
+        self._var  = tk.IntVar(value=initial)
+        self._from = from_
+        self._to   = to
+        ctk.CTkButton(self, text="−", width=28, height=28,
+                      fg_color=_BG4, hover_color=_BG3, text_color=_FG,
+                      command=lambda: self._step(-1)).pack(side="left")
+        ctk.CTkEntry(self, textvariable=self._var, width=width - 60,
+                     height=28, justify="center", font=_FONT_SM,
+                     fg_color=_BG3, border_color=_BG4,
+                     text_color=_FG).pack(side="left", padx=3)
+        ctk.CTkButton(self, text="+", width=28, height=28,
+                      fg_color=_BG4, hover_color=_BG3, text_color=_FG,
+                      command=lambda: self._step(1)).pack(side="left")
+
+    def _step(self, d):
+        self._var.set(max(self._from, min(self._to, self._var.get() + d)))
+
+    def get(self) -> int:
+        return self._var.get()
+
+    def set(self, v: int):
+        self._var.set(v)
+
+
+# ─── Ligne de scénario ────────────────────────────────────────────────────────
+
+class _ScenarioRow(ctk.CTkFrame):
+    """Une ligne dans la liste des scénarios : nom + badge runs + boutons."""
+
+    _COLOR_NORMAL   = _BG3
+    _COLOR_SELECTED = "#2C3866"
+
+    def __init__(self, parent, scenario_path: Path, run_count: int,
+                 on_select, on_delete, on_rename, **kw):
+        super().__init__(parent, fg_color=self._COLOR_NORMAL,
+                         corner_radius=6, **kw)
+        self.scenario_path = scenario_path
+        self._on_select    = on_select
+        self._selected     = False
+
+        # Lire le nom du scénario depuis le JSON (champ scenario_name)
+        self._display_name = self._read_scenario_name(scenario_path)
+
+        # Colonne principale cliquable
+        inner = ctk.CTkFrame(self, fg_color="transparent")
+        inner.pack(side="left", fill="both", expand=True,
+                   padx=(8, 0), pady=4)
+
+        icon = ctk.CTkLabel(inner, text="🎬", font=("Segoe UI", 11),
+                             text_color=_ACCENT2, width=20)
+        icon.pack(side="left")
+        icon.bind("<Button-1>", lambda _: on_select(scenario_path))
+
+        self._name_lbl = ctk.CTkLabel(
+            inner, text=self._display_name,
+            font=_FONT_SM, text_color=_FG,
+            anchor="w",
+        )
+        self._name_lbl.pack(side="left", padx=(6, 0), fill="x", expand=True)
+        self._name_lbl.bind("<Button-1>", lambda _: on_select(scenario_path))
+
+        # Badge nombre de runs
+        if run_count > 0:
+            badge = ctk.CTkLabel(
+                self, text=f"{run_count}▸", font=("Segoe UI", 9),
+                text_color=_FG2, width=30,
+            )
+            badge.pack(side="right", padx=(0, 2))
+
+        # Bouton renommer
+        btn_rename = ctk.CTkButton(
+            self, text="✎", width=24, height=24,
+            fg_color="transparent", hover_color=_BG4,
+            text_color=_FG2, font=("Segoe UI", 11),
+            command=lambda: on_rename(scenario_path, self),
+        )
+        btn_rename.pack(side="right")
+        CTkToolTip(btn_rename, "Renommer ce scénario")
+
+        # Bouton supprimer
+        btn_del = ctk.CTkButton(
+            self, text="🗑", width=24, height=24,
+            fg_color="transparent", hover_color="#3D1F22",
+            text_color=_RED, font=("Segoe UI", 11),
+            command=lambda: on_delete(scenario_path),
+        )
+        btn_del.pack(side="right", padx=(0, 2))
+        CTkToolTip(btn_del, "Supprimer ce scénario définitivement")
+
+    @staticmethod
+    def _read_scenario_name(path: Path) -> str:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("scenario_name") or path.stem
+        except Exception:
+            return path.stem
+
+    def set_selected(self, selected: bool):
+        self._selected = selected
+        self.configure(fg_color=self._COLOR_SELECTED if selected else self._COLOR_NORMAL)
+
+    def update_name(self, new_name: str):
+        self._display_name = new_name
+        self._name_lbl.configure(text=new_name)
 
 
 # ─── Application principale ───────────────────────────────────────────────────
 
-class App(tk.Tk):
+class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("WinGhost RPA v3")
-        self.configure(bg=BG)
-        self.resizable(True, True)
-        self.minsize(920, 680)
-        center_window_on_primary(self)
+        self.title("WinGhost RPA v4")
+        self.configure(fg_color=_BG)
+        self.minsize(1000, 700)
+        self._center_window(1060, 740)
 
-        self._recorder: ActionRecorder | None = None
-        self._replayer: ActionReplayer | None = None
+        self._recorder: ActionRecorder | None  = None
+        self._replayer: ActionReplayer | None  = None
         self._multi_runner: MultiReplayRunner | None = None
         self._session_path: Path | None = None
         self._replay_thread: threading.Thread | None = None
@@ -95,506 +245,744 @@ class App(tk.Tk):
         self._report_html_path: Path | None = None
         self._current_run_index  = 0
         self._total_runs_planned = 1
+        self._scenario_rows: list[_ScenarioRow] = []
 
         stats_db.init_db()
+        official_log.init_logs()
         self._build_ui()
-        self._refresh_session_list()
-        self.after(200, self._update_monitor_status)
+        self._refresh_scenario_list()
+        self.after(300, self._update_monitor_status)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    # ── Centrage ──────────────────────────────────────────────────────────────
+
+    def _center_window(self, w: int, h: int):
+        try:
+            monitors = get_all_monitors()
+            m = monitors[0]
+            x = m["left"] + (m["width"]  - w) // 2
+            y = m["top"]  + (m["height"] - h) // 2
+        except Exception:
+            x = y = 100
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
     # ── Construction UI ───────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Header
-        header = tk.Frame(self, bg=BG, pady=10)
-        header.pack(fill="x", padx=20)
-        tk.Label(header, text="WinGhost RPA v3", font=FONT_H1, bg=BG, fg=FG).pack(side="left")
-        self._status_var = tk.StringVar(value="Prêt")
-        tk.Label(header, textvariable=self._status_var,
-                 font=FONT_UI, bg=BG, fg=FG2).pack(side="right", padx=10)
+        # ── Header ───────────────────────────────────────────────────────────
+        header = ctk.CTkFrame(self, fg_color=_BG2, corner_radius=0, height=52)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+
+        ctk.CTkLabel(header, text="🤖  WinGhost RPA v4",
+                     font=_FONT_H1, text_color=_ACCENT).pack(
+            side="left", padx=20)
+
         self._monitor_var = tk.StringVar(value="")
-        tk.Label(header, textvariable=self._monitor_var,
-                 font=("Segoe UI", 9), bg=BG, fg=FG2).pack(side="right", padx=(0, 16))
+        ctk.CTkLabel(header, textvariable=self._monitor_var,
+                     font=_FONT_SM, text_color=_FG2).pack(side="right", padx=16)
 
-        tk.Frame(self, bg=BG3, height=1).pack(fill="x", padx=20)
+        self._status_var = tk.StringVar(value="Prêt")
+        ctk.CTkLabel(header, textvariable=self._status_var,
+                     font=_FONT_SM, text_color=_FG2).pack(side="right", padx=(0, 10))
 
-        main = tk.Frame(self, bg=BG)
-        main.pack(fill="both", expand=True, padx=20, pady=10)
+        # ── Corps principal ───────────────────────────────────────────────────
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=16, pady=12)
 
-        left = tk.Frame(main, bg=BG, width=290)
+        left = ctk.CTkFrame(body, fg_color="transparent", width=290)
         left.pack(side="left", fill="y", padx=(0, 12))
         left.pack_propagate(False)
 
-        right = tk.Frame(main, bg=BG)
+        right = ctk.CTkFrame(body, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True)
 
-        self._build_left_panel(left)
-        self._build_right_panel(right)
+        self._build_left(left)
+        self._build_right(right)
 
-    def _build_left_panel(self, parent):
-        # ── RECORD ───────────────────────────────────────────────────────────
-        rec_frame = tk.LabelFrame(parent, text=" ⬤  Enregistrement ",
-                                  font=FONT_UI, bg=BG2, fg=FG, bd=1,
-                                  relief="flat", padx=10, pady=10)
-        rec_frame.pack(fill="x", pady=(0, 10))
+    # ── Panneau gauche ────────────────────────────────────────────────────────
 
-        self._screenshots_rec_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(rec_frame, text="Capturer screenshots (recorder)",
-                       variable=self._screenshots_rec_var,
-                       bg=BG2, fg=FG2, selectcolor=BG3,
-                       activebackground=BG2, font=FONT_UI).pack(anchor="w")
+    def _build_left(self, parent):
+        # RECORD
+        rec = ctk.CTkFrame(parent, fg_color=_BG2, corner_radius=10)
+        rec.pack(fill="x", pady=(0, 10))
 
-        self._rec_btn = tk.Button(
-            rec_frame, text="  ⬤  RECORD",
+        ctk.CTkLabel(rec, text="⬤  Enregistrement",
+                     font=_FONT_SM, text_color=_FG2).pack(
+            anchor="w", padx=12, pady=(10, 4))
+
+        # Nom du scénario
+        name_row = ctk.CTkFrame(rec, fg_color="transparent")
+        name_row.pack(fill="x", padx=10, pady=(0, 6))
+        ctk.CTkLabel(name_row, text="Nom :", font=_FONT_SM,
+                     text_color=_FG2, width=44).pack(side="left")
+        self._scenario_name_entry = ctk.CTkEntry(
+            name_row, placeholder_text="Mon scénario…",
+            font=_FONT_SM, fg_color=_BG3, border_color=_BG4,
+            text_color=_FG, height=28,
+        )
+        self._scenario_name_entry.pack(side="left", fill="x", expand=True)
+        CTkToolTip(self._scenario_name_entry,
+                   "Nom du scénario qui sera enregistré")
+
+        self._rec_btn = ctk.CTkButton(
+            rec, text="  ⬤  RECORD",
+            font=("Segoe UI Semibold", 12),
+            fg_color=_GREEN, hover_color="#35A07E", text_color=_BG,
+            height=36, corner_radius=8,
             command=self._toggle_record,
-            bg=GREEN, fg=BG, font=("Segoe UI Semibold", 11),
-            relief="flat", padx=12, pady=6, cursor="hand2",
         )
-        self._rec_btn.pack(fill="x", pady=(8, 0))
+        self._rec_btn.pack(fill="x", padx=10, pady=(0, 10))
+        CTkToolTip(self._rec_btn,
+                   "Démarrer l'enregistrement des actions souris/clavier\n"
+                   "Cliquer à nouveau pour arrêter et sauvegarder")
 
-        # ── Sessions ─────────────────────────────────────────────────────────
-        sess_frame = tk.LabelFrame(parent, text=" ▶  Sessions ",
-                                   font=FONT_UI, bg=BG2, fg=FG, bd=1,
-                                   relief="flat", padx=10, pady=8)
-        sess_frame.pack(fill="both", expand=True, pady=(0, 10))
+        # SCÉNARIOS
+        scen_frame = ctk.CTkFrame(parent, fg_color=_BG2, corner_radius=10)
+        scen_frame.pack(fill="both", expand=True, pady=(0, 10))
 
-        sb = tk.Scrollbar(sess_frame)
-        sb.pack(side="right", fill="y")
-        self._session_listbox = tk.Listbox(
-            sess_frame, bg=BG3, fg=FG, font=FONT_MONO,
-            selectbackground=ACCENT, selectforeground=BG,
-            relief="flat", highlightthickness=0, yscrollcommand=sb.set,
+        hdr = ctk.CTkFrame(scen_frame, fg_color="transparent")
+        hdr.pack(fill="x", padx=10, pady=(10, 4))
+        ctk.CTkLabel(hdr, text="▶  Scénarios",
+                     font=_FONT_SM, text_color=_FG2).pack(side="left")
+        rf = ctk.CTkButton(hdr, text="↺", width=26, height=24,
+                           fg_color="transparent", hover_color=_BG4,
+                           text_color=_FG2, font=("Segoe UI", 12),
+                           command=self._refresh_scenario_list)
+        rf.pack(side="right")
+        CTkToolTip(rf, "Rafraîchir la liste des scénarios")
+
+        self._scen_scroll = ctk.CTkScrollableFrame(
+            scen_frame, fg_color=_BG3, corner_radius=6,
+            scrollbar_button_color=_BG4,
+            scrollbar_button_hover_color=_ACCENT,
         )
-        self._session_listbox.pack(fill="both", expand=True)
-        sb.config(command=self._session_listbox.yview)
-        self._session_listbox.bind("<<ListboxSelect>>", self._on_session_select)
+        self._scen_scroll.pack(fill="both", expand=True, padx=8, pady=(0, 6))
 
-        btns = tk.Frame(sess_frame, bg=BG2)
-        btns.pack(fill="x", pady=(6, 0))
-        tk.Button(btns, text="Rafraîchir", command=self._refresh_session_list,
-                  bg=BG3, fg=FG2, font=FONT_UI, relief="flat",
-                  padx=6, pady=3, cursor="hand2").pack(side="left")
-        tk.Button(btns, text="Parcourir…", command=self._browse_session,
-                  bg=BG3, fg=FG2, font=FONT_UI, relief="flat",
-                  padx=6, pady=3, cursor="hand2").pack(side="left", padx=(4, 0))
+        browse_btn = ctk.CTkButton(
+            scen_frame, text="Parcourir…", height=26,
+            fg_color=_BG3, hover_color=_BG4, text_color=_FG2,
+            font=_FONT_SM, corner_radius=6,
+            command=self._browse_scenario,
+        )
+        browse_btn.pack(fill="x", padx=10, pady=(0, 8))
+        CTkToolTip(browse_btn, "Ouvrir un fichier scénario JSON depuis un autre dossier")
 
-        # ── Options replay ────────────────────────────────────────────────────
-        opt_frame = tk.LabelFrame(parent, text=" ⚙  Options replay ",
-                                  font=FONT_UI, bg=BG2, fg=FG, bd=1,
-                                  relief="flat", padx=10, pady=8)
-        opt_frame.pack(fill="x", pady=(0, 10))
-        opt_frame.columnconfigure(1, weight=1)
+        # OPTIONS
+        opt = ctk.CTkFrame(parent, fg_color=_BG2, corner_radius=10)
+        opt.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(opt, text="⚙  Options replay",
+                     font=_FONT_SM, text_color=_FG2).pack(
+            anchor="w", padx=12, pady=(10, 4))
 
         # Seuil OCR
-        tk.Label(opt_frame, text="Seuil OCR :", bg=BG2, fg=FG2,
-                 font=FONT_UI).grid(row=0, column=0, sticky="w", pady=2)
+        ocr_row = ctk.CTkFrame(opt, fg_color="transparent")
+        ocr_row.pack(fill="x", padx=10, pady=2)
+        ctk.CTkLabel(ocr_row, text="Seuil OCR", font=_FONT_SM,
+                     text_color=_FG2, width=90).pack(side="left")
         self._ocr_threshold_var = tk.DoubleVar(value=0.40)
-        tk.Scale(opt_frame, variable=self._ocr_threshold_var, from_=0.0, to=1.0,
-                 resolution=0.05, orient="horizontal", bg=BG2, fg=FG,
-                 troughcolor=BG3, highlightthickness=0, sliderrelief="flat",
-                 font=FONT_UI).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        ocr_lbl = ctk.CTkLabel(ocr_row, textvariable=tk.StringVar(),
+                                font=_FONT_SM, text_color=_FG, width=36)
+        ocr_lbl.pack(side="right")
+        ocr_slider = ctk.CTkSlider(
+            ocr_row, variable=self._ocr_threshold_var,
+            from_=0.0, to=1.0, number_of_steps=20,
+            button_color=_ACCENT, button_hover_color=_ACCENT,
+            progress_color=_ACCENT, fg_color=_BG3,
+            command=lambda v: ocr_lbl.configure(text=f"{v:.2f}"),
+        )
+        ocr_slider.pack(side="left", fill="x", expand=True, padx=6)
+        ocr_lbl.configure(text=f"{self._ocr_threshold_var.get():.2f}")
+        CTkToolTip(ocr_slider,
+                   "Score minimum de similarité OCR pour valider une action\n"
+                   "0.0 = jamais ignorer · 1.0 = correspondance parfaite requise")
 
-        # Répétitions (multi-run)
-        tk.Label(opt_frame, text="Répétitions :", bg=BG2, fg=FG2,
-                 font=FONT_UI).grid(row=1, column=0, sticky="w", pady=2)
-        self._n_runs_var = tk.IntVar(value=1)
-        tk.Spinbox(opt_frame, textvariable=self._n_runs_var, from_=1, to=99,
-                   bg=BG3, fg=FG, font=FONT_UI, relief="flat",
-                   buttonbackground=BG4, width=6,
-                   ).grid(row=1, column=1, sticky="w", padx=(6, 0))
+        # Répétitions
+        rep_row = ctk.CTkFrame(opt, fg_color="transparent")
+        rep_row.pack(fill="x", padx=10, pady=2)
+        ctk.CTkLabel(rep_row, text="Répétitions", font=_FONT_SM,
+                     text_color=_FG2, width=90).pack(side="left")
+        self._spin_runs = _Spinbox(rep_row, from_=1, to=99, initial=1, width=110)
+        self._spin_runs.pack(side="left")
+        CTkToolTip(self._spin_runs,
+                   "Nombre de fois où rejouer le scénario consécutivement\n"
+                   "Les stats de chaque run sont sauvegardées séparément")
 
-        # Intervalle entre runs
-        tk.Label(opt_frame, text="Intervalle (s) :", bg=BG2, fg=FG2,
-                 font=FONT_UI).grid(row=2, column=0, sticky="w", pady=2)
+        # Intervalle
+        int_row = ctk.CTkFrame(opt, fg_color="transparent")
+        int_row.pack(fill="x", padx=10, pady=(2, 10))
+        ctk.CTkLabel(int_row, text="Intervalle (s)", font=_FONT_SM,
+                     text_color=_FG2, width=90).pack(side="left")
         self._interval_var = tk.DoubleVar(value=5.0)
-        tk.Entry(opt_frame, textvariable=self._interval_var,
-                 bg=BG3, fg=FG, font=FONT_UI, relief="flat", width=7,
-                 ).grid(row=2, column=1, sticky="w", padx=(6, 0))
+        int_entry = ctk.CTkEntry(int_row, textvariable=self._interval_var,
+                                  width=70, height=28, justify="center",
+                                  font=_FONT_SM, fg_color=_BG3,
+                                  border_color=_BG4, text_color=_FG)
+        int_entry.pack(side="left", padx=6)
+        CTkToolTip(int_entry,
+                   "Pause en secondes entre deux runs consécutifs\n"
+                   "Utile pour laisser l'application se réinitialiser")
 
-        # Screenshots post-action
-        self._screenshots_replay_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(opt_frame, text="Screenshots post-action",
-                       variable=self._screenshots_replay_var,
-                       bg=BG2, fg=FG2, selectcolor=BG3,
-                       activebackground=BG2, font=FONT_UI,
-                       ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
-
-        # ── Boutons REPLAY / STOP ─────────────────────────────────────────────
-        action_frame = tk.Frame(parent, bg=BG)
-        action_frame.pack(fill="x")
-
-        self._replay_btn = tk.Button(
-            action_frame, text="  ▶  REPLAY",
+        # BOUTONS D'ACTION
+        self._replay_btn = ctk.CTkButton(
+            parent, text="  ▶  REPLAY",
+            font=("Segoe UI Semibold", 12),
+            fg_color=_ACCENT, hover_color="#4070CC", text_color=_BG,
+            height=38, corner_radius=8,
+            state="disabled",
             command=self._start_replay,
-            bg=ACCENT, fg=BG, font=("Segoe UI Semibold", 11),
-            relief="flat", padx=12, pady=6, cursor="hand2",
-            state="disabled",
         )
-        self._replay_btn.pack(fill="x", pady=(0, 4))
+        self._replay_btn.pack(fill="x", pady=(0, 6))
+        CTkToolTip(self._replay_btn,
+                   "Lancer le replay du scénario sélectionné\n"
+                   "Vérifie visuellement chaque action via OCR avant de l'exécuter")
 
-        self._stop_btn = tk.Button(
-            action_frame, text="  ■  STOP",
+        self._stop_btn = ctk.CTkButton(
+            parent, text="  ■  STOP",
+            font=("Segoe UI Semibold", 12),
+            fg_color=_RED, hover_color="#B04050", text_color=_BG,
+            height=38, corner_radius=8,
+            state="disabled",
             command=self._stop_replay,
-            bg=RED, fg=BG, font=("Segoe UI Semibold", 11),
-            relief="flat", padx=12, pady=6, cursor="hand2",
-            state="disabled",
         )
-        self._stop_btn.pack(fill="x", pady=(0, 4))
+        self._stop_btn.pack(fill="x", pady=(0, 6))
+        CTkToolTip(self._stop_btn,
+                   "Arrêter le replay en cours après l'action courante\n"
+                   "Les résultats déjà collectés seront sauvegardés")
 
-        # Bouton Dashboard web
-        self._dashboard_btn = tk.Button(
-            action_frame, text="  🌐  Dashboard Web",
+        self._dashboard_btn = ctk.CTkButton(
+            parent, text="  🌐  Dashboard Web",
+            font=_FONT_SM,
+            fg_color=_BG3, hover_color=_BG4, text_color=_ACCENT,
+            height=34, corner_radius=8,
             command=self._open_dashboard,
-            bg=BG3, fg=ACCENT, font=FONT_UI,
-            relief="flat", padx=12, pady=5, cursor="hand2",
         )
         self._dashboard_btn.pack(fill="x")
+        CTkToolTip(self._dashboard_btn,
+                   "Ouvrir le dashboard Flask dans le navigateur\n"
+                   f"http://127.0.0.1:{_SERVER_PORT}/\n"
+                   "Graphiques, heatmap horaire, export CSV")
 
-    def _build_right_panel(self, parent):
+    # ── Panneau droit ─────────────────────────────────────────────────────────
+
+    def _build_right(self, parent):
         # Barre de progression
-        prog_frame = tk.Frame(parent, bg=BG)
-        prog_frame.pack(fill="x", pady=(0, 8))
+        prog_row = ctk.CTkFrame(parent, fg_color="transparent", height=32)
+        prog_row.pack(fill="x", pady=(0, 8))
+        prog_row.pack_propagate(False)
 
-        self._run_lbl = tk.Label(prog_frame, text="", font=FONT_UI, bg=BG, fg=ACCENT2)
+        self._run_lbl = ctk.CTkLabel(prog_row, text="",
+                                      font=_FONT_SM, text_color=_ACCENT2, width=80)
         self._run_lbl.pack(side="left")
 
         self._progress_var = tk.DoubleVar(value=0)
-        self._progress_lbl = tk.Label(prog_frame, text="0 / 0",
-                                       font=FONT_UI, bg=BG, fg=FG2)
-        self._progress_lbl.pack(side="right")
-
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("RPA.Horizontal.TProgressbar",
-                         troughcolor=BG3, background=ACCENT,
-                         thickness=8, borderwidth=0)
-        self._progress = ttk.Progressbar(
-            prog_frame, variable=self._progress_var,
-            style="RPA.Horizontal.TProgressbar",
-            maximum=100,
+        self._progress_bar = ctk.CTkProgressBar(
+            prog_row, variable=self._progress_var,
+            progress_color=_ACCENT, fg_color=_BG3, height=8,
         )
-        self._progress.pack(fill="x", side="left", expand=True, padx=(8, 10))
+        self._progress_bar.set(0)
+        self._progress_bar.pack(side="left", fill="x", expand=True, padx=8)
 
-        # Onglets
-        nb_style = ttk.Style()
-        nb_style.configure("RPA.TNotebook", background=BG, borderwidth=0)
-        nb_style.configure("RPA.TNotebook.Tab", background=BG3, foreground=FG2,
-                            padding=[12, 4], font=FONT_UI)
-        nb_style.map("RPA.TNotebook.Tab",
-                     background=[("selected", BG2)],
-                     foreground=[("selected", FG)])
+        self._progress_lbl = ctk.CTkLabel(prog_row, text="",
+                                           font=_FONT_SM, text_color=_FG2, width=60)
+        self._progress_lbl.pack(side="left")
 
-        self._notebook = ttk.Notebook(parent, style="RPA.TNotebook")
-        self._notebook.pack(fill="both", expand=True)
-
-        log_tab = tk.Frame(self._notebook, bg=BG2)
-        self._notebook.add(log_tab, text="Journal")
-
-        report_tab = tk.Frame(self._notebook, bg=BG2)
-        self._notebook.add(report_tab, text="Rapport")
-
-        stats_tab = tk.Frame(self._notebook, bg=BG2)
-        self._notebook.add(stats_tab, text="Stats long-terme")
-
-        self._build_log_tab(log_tab)
-        self._build_report_tab(report_tab)
-        self._build_stats_tab(stats_tab)
-
-    def _build_log_tab(self, parent):
-        self._log_text = tk.Text(
-            parent, bg=BG2, fg=FG, font=FONT_MONO,
-            relief="flat", highlightthickness=0,
-            state="disabled", wrap="word",
+        # Onglets principaux
+        self._tabs = ctk.CTkTabview(
+            parent,
+            fg_color=_BG2,
+            segmented_button_fg_color=_BG3,
+            segmented_button_selected_color=_ACCENT,
+            segmented_button_selected_hover_color="#4070CC",
+            segmented_button_unselected_color=_BG3,
+            segmented_button_unselected_hover_color=_BG4,
+            text_color=_FG,
+            text_color_disabled=_FG2,
+            corner_radius=10,
         )
-        sb = tk.Scrollbar(parent, command=self._log_text.yview)
-        self._log_text.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        self._log_text.pack(fill="both", expand=True, padx=2, pady=2)
+        self._tabs.pack(fill="both", expand=True)
+        self._tabs.add("Journal")
+        self._tabs.add("Rapport")
+        self._tabs.add("Stats long-terme")
+        self._tabs._segmented_button.configure(font=_FONT_SM)
 
-        for tag, fg in [("ok", GREEN), ("warn", YELLOW), ("error", RED),
-                        ("info", FG2), ("heading", ACCENT), ("label", ACCENT2),
-                        ("run", ACCENT2)]:
+        # Bind tab change pour rafraîchir les stats
+        self._tabs._segmented_button.bind("<Button-1>",
+                                          lambda e: self.after(100, self._on_tab_changed))
+
+        self._build_journal_tab(self._tabs.tab("Journal"))
+        self._build_report_tab(self._tabs.tab("Rapport"))
+        self._build_stats_tab(self._tabs.tab("Stats long-terme"))
+
+    def _build_journal_tab(self, parent):
+        # Sous-onglets : Officiel / Debug
+        self._log_tabs = ctk.CTkTabview(
+            parent,
+            fg_color=_BG3,
+            segmented_button_fg_color=_BG4,
+            segmented_button_selected_color=_BG2,
+            segmented_button_unselected_color=_BG4,
+            segmented_button_unselected_hover_color=_BG3,
+            text_color=_FG,
+            corner_radius=8,
+            height=28,
+        )
+        self._log_tabs.pack(fill="both", expand=True, padx=4, pady=4)
+        self._log_tabs.add("Journal officiel")
+        self._log_tabs.add("Log debug")
+        self._log_tabs._segmented_button.configure(font=_FONT_SM)
+
+        # Journal officiel
+        off_tab = self._log_tabs.tab("Journal officiel")
+        off_top = ctk.CTkFrame(off_tab, fg_color="transparent")
+        off_top.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(off_top,
+                     text="Une ligne par exécution complète  ·  app ; scénario ; durée ; statut",
+                     font=("Segoe UI", 9), text_color=_FG2).pack(side="left")
+        exp_csv = ctk.CTkButton(off_top, text="⬇ CSV officiel", height=24, width=100,
+                                 fg_color=_BG4, hover_color=_BG3, text_color=_FG2,
+                                 font=_FONT_SM, corner_radius=6,
+                                 command=self._export_official_csv)
+        exp_csv.pack(side="right")
+        CTkToolTip(exp_csv, "Exporter le journal officiel du mois courant en CSV")
+
+        self._official_log_box = ctk.CTkTextbox(
+            off_tab, font=_FONT_MONO,
+            fg_color=_BG3, text_color=_FG,
+            state="disabled", corner_radius=6,
+        )
+        self._official_log_box.pack(fill="both", expand=True)
+        # Tags via le widget Text interne
+        self._official_log_box._textbox.tag_configure("ok",   foreground=_GREEN)
+        self._official_log_box._textbox.tag_configure("warn", foreground=_YELLOW)
+        self._official_log_box._textbox.tag_configure("err",  foreground=_RED)
+        self._official_log_box._textbox.tag_configure("head", foreground=_ACCENT,
+                                                       font=("Consolas", 9, "bold"))
+
+        # Log debug
+        dbg_tab = self._log_tabs.tab("Log debug")
+        ctk.CTkLabel(dbg_tab,
+                     text="Détail action-par-action (OCR, timing, erreurs)",
+                     font=("Segoe UI", 9), text_color=_FG2).pack(anchor="w", pady=(0, 4))
+        self._debug_log_box = ctk.CTkTextbox(
+            dbg_tab, font=_FONT_MONO,
+            fg_color=_BG3, text_color=_FG,
+            state="disabled", corner_radius=6,
+        )
+        self._debug_log_box.pack(fill="both", expand=True)
+        for tag, fg in [("ok", _GREEN), ("warn", _YELLOW), ("error", _RED),
+                        ("info", _FG2), ("heading", _ACCENT), ("run", _ACCENT2)]:
             kw = {"foreground": fg}
             if tag in ("heading", "run"):
                 kw["font"] = ("Consolas", 9, "bold")
-            self._log_text.tag_configure(tag, **kw)
+            self._debug_log_box._textbox.tag_configure(tag, **kw)
+
+        # Charger les entrées existantes du journal officiel
+        self.after(500, self._load_official_log)
 
     def _build_report_tab(self, parent):
-        cols = ("#", "Type", "Cible", "OCR Score", "Visuel OK", "Réponse (ms)", "Statut")
-        tree_frame = tk.Frame(parent, bg=BG2)
-        tree_frame.pack(fill="both", expand=True, padx=4, pady=4)
+        cols = ("#", "Type", "Cible", "OCR", "Visuel", "Réponse (ms)", "Statut")
+        frame = ctk.CTkFrame(parent, fg_color=_BG3, corner_radius=8)
+        frame.pack(fill="both", expand=True, padx=4, pady=4)
 
-        sb = tk.Scrollbar(tree_frame)
+        sb = tk.Scrollbar(frame)
         sb.pack(side="right", fill="y")
 
-        ts = ttk.Style()
-        ts.configure("RPA.Treeview", background=BG3, fieldbackground=BG3,
-                     foreground=FG, rowheight=22, font=FONT_MONO, borderwidth=0)
-        ts.configure("RPA.Treeview.Heading", background=BG2, foreground=ACCENT,
-                     font=("Segoe UI Semibold", 9))
-        ts.map("RPA.Treeview",
-               background=[("selected", ACCENT)], foreground=[("selected", BG)])
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("V4.Treeview",
+                         background=_BG3, fieldbackground=_BG3,
+                         foreground=_FG, rowheight=22,
+                         font=_FONT_MONO, borderwidth=0)
+        style.configure("V4.Treeview.Heading",
+                         background=_BG4, foreground=_ACCENT,
+                         font=("Segoe UI Semibold", 9), relief="flat")
+        style.map("V4.Treeview",
+                  background=[("selected", _ACCENT)],
+                  foreground=[("selected", _BG)])
 
-        self._tree = ttk.Treeview(tree_frame, columns=cols, show="headings",
-                                   style="RPA.Treeview", yscrollcommand=sb.set)
+        self._tree = ttk.Treeview(frame, columns=cols, show="headings",
+                                   style="V4.Treeview", yscrollcommand=sb.set)
         for col in cols:
             self._tree.heading(col, text=col)
         self._tree.column("#",            width=40,  stretch=False)
         self._tree.column("Type",         width=100, stretch=False)
         self._tree.column("Cible",        width=180, stretch=True)
-        self._tree.column("OCR Score",    width=75,  stretch=False)
-        self._tree.column("Visuel OK",    width=70,  stretch=False)
+        self._tree.column("OCR",          width=60,  stretch=False)
+        self._tree.column("Visuel",       width=60,  stretch=False)
         self._tree.column("Réponse (ms)", width=100, stretch=False)
-        self._tree.column("Statut",       width=160, stretch=True)
+        self._tree.column("Statut",       width=150, stretch=True)
         sb.config(command=self._tree.yview)
         self._tree.pack(fill="both", expand=True)
 
-        for tag, fg in [("ok", GREEN), ("warn", YELLOW), ("error", RED)]:
+        for tag, fg in [("ok", _GREEN), ("warn", _YELLOW), ("error", _RED)]:
             self._tree.tag_configure(tag, foreground=fg)
 
-        footer = tk.Frame(parent, bg=BG2)
-        footer.pack(fill="x", padx=4, pady=(0, 4))
+        foot = ctk.CTkFrame(parent, fg_color="transparent")
+        foot.pack(fill="x", padx=4, pady=(4, 0))
 
-        self._summary_lbl = tk.Label(footer, text="", font=FONT_UI, bg=BG2, fg=FG2, anchor="w")
-        self._summary_lbl.pack(side="left")
+        self._report_summary_lbl = ctk.CTkLabel(
+            foot, text="", font=_FONT_SM, text_color=_FG2, anchor="w")
+        self._report_summary_lbl.pack(side="left")
 
-        tk.Button(footer, text="📂 Rapports", command=lambda: self._open_folder(REPORTS_DIR),
-                  bg=BG3, fg=FG2, font=FONT_UI, relief="flat",
-                  padx=8, pady=3, cursor="hand2").pack(side="right")
-        tk.Button(footer, text="Exporter JSON", command=self._export_report_json,
-                  bg=BG3, fg=FG2, font=FONT_UI, relief="flat",
-                  padx=8, pady=3, cursor="hand2").pack(side="right", padx=(0, 4))
-        self._html_btn = tk.Button(footer, text="🌐 Exporter HTML",
-                                    command=self._export_report_html,
-                                    bg=ACCENT, fg=BG,
-                                    font=("Segoe UI Semibold", 10),
-                                    relief="flat", padx=8, pady=3, cursor="hand2")
-        self._html_btn.pack(side="right", padx=(0, 4))
+        btn_folder = ctk.CTkButton(foot, text="📂 Rapports", height=28, width=100,
+                                    fg_color=_BG3, hover_color=_BG4,
+                                    text_color=_FG2, font=_FONT_SM, corner_radius=6,
+                                    command=lambda: self._open_folder(REPORTS_DIR))
+        btn_folder.pack(side="right")
+        CTkToolTip(btn_folder, "Ouvrir le dossier des rapports dans l'explorateur")
+
+        btn_json = ctk.CTkButton(foot, text="JSON", height=28, width=60,
+                                  fg_color=_BG3, hover_color=_BG4,
+                                  text_color=_FG2, font=_FONT_SM, corner_radius=6,
+                                  command=self._export_report_json)
+        btn_json.pack(side="right", padx=(0, 4))
+        CTkToolTip(btn_json, "Exporter les résultats du dernier replay en JSON")
+
+        btn_html = ctk.CTkButton(foot, text="🌐 HTML", height=28, width=80,
+                                  fg_color=_ACCENT, hover_color="#4070CC",
+                                  text_color=_BG, font=_FONT_SM, corner_radius=6,
+                                  command=self._export_report_html)
+        btn_html.pack(side="right", padx=(0, 4))
+        CTkToolTip(btn_html,
+                   "Générer un rapport HTML avec graphique SVG\n"
+                   "et screenshots inline, puis l'ouvrir dans le navigateur")
 
     def _build_stats_tab(self, parent):
-        top = tk.Frame(parent, bg=BG2)
-        top.pack(fill="x", padx=8, pady=(8, 4))
+        # Sélecteur de session
+        top = ctk.CTkFrame(parent, fg_color="transparent")
+        top.pack(fill="x", padx=4, pady=(4, 6))
 
-        tk.Label(top, text="Session :", bg=BG2, fg=FG2, font=FONT_UI).pack(side="left")
+        ctk.CTkLabel(top, text="Scénario :", font=_FONT_SM,
+                     text_color=_FG2).pack(side="left")
+
         self._stats_session_var = tk.StringVar()
-        self._stats_session_cb  = ttk.Combobox(top, textvariable=self._stats_session_var,
-                                                state="readonly", width=40)
-        self._stats_session_cb.pack(side="left", padx=(6, 0))
-        self._stats_session_cb.bind("<<ComboboxSelected>>", lambda _: self._refresh_stats())
+        self._stats_session_cb  = ctk.CTkComboBox(
+            top, variable=self._stats_session_var,
+            values=[], state="readonly", width=300,
+            font=_FONT_SM, fg_color=_BG3, border_color=_BG4,
+            button_color=_BG4, button_hover_color=_ACCENT,
+            dropdown_fg_color=_BG3, dropdown_text_color=_FG,
+            dropdown_hover_color=_BG4,
+            command=lambda _: self._refresh_stats(),
+        )
+        self._stats_session_cb.pack(side="left", padx=8)
+        CTkToolTip(self._stats_session_cb,
+                   "Sélectionner le scénario à analyser dans la base de données")
 
-        tk.Button(top, text="🔄 Actualiser", command=self._refresh_stats,
-                  bg=BG3, fg=FG2, font=FONT_UI, relief="flat",
-                  padx=8, pady=3, cursor="hand2").pack(side="left", padx=(8, 0))
-        tk.Button(top, text="⬇ Export CSV", command=self._export_csv,
-                  bg=GREEN, fg=BG, font=("Segoe UI Semibold", 10),
-                  relief="flat", padx=8, pady=3, cursor="hand2").pack(side="left", padx=(4, 0))
-        tk.Button(top, text="🌐 Dashboard Web", command=self._open_dashboard,
-                  bg=BG3, fg=ACCENT, font=FONT_UI, relief="flat",
-                  padx=8, pady=3, cursor="hand2").pack(side="right")
+        btn_refresh = ctk.CTkButton(top, text="🔄", width=32, height=30,
+                                     fg_color=_BG3, hover_color=_BG4,
+                                     text_color=_FG2, font=_FONT_SM, corner_radius=6,
+                                     command=self._refresh_stats_full)
+        btn_refresh.pack(side="left")
+        CTkToolTip(btn_refresh, "Actualiser les statistiques depuis la base SQLite")
 
-        # Notebook interne : Runs / Labels
-        nb2 = ttk.Notebook(parent, style="RPA.TNotebook")
-        nb2.pack(fill="both", expand=True, padx=4, pady=4)
+        btn_csv = ctk.CTkButton(top, text="⬇ CSV", height=30, width=70,
+                                 fg_color=_GREEN, hover_color="#35A07E",
+                                 text_color=_BG, font=_FONT_SM, corner_radius=6,
+                                 command=self._export_csv)
+        btn_csv.pack(side="left", padx=6)
+        CTkToolTip(btn_csv,
+                   "Exporter tous les runs de ce scénario en CSV\n"
+                   "Compatible Excel (UTF-8 BOM)")
 
-        runs_tab   = tk.Frame(nb2, bg=BG2)
-        labels_tab = tk.Frame(nb2, bg=BG2)
-        nb2.add(runs_tab,   text="Historique des runs")
-        nb2.add(labels_tab, text="Stats par bouton")
+        btn_web = ctk.CTkButton(top, text="🌐 Dashboard", height=30, width=100,
+                                 fg_color=_BG3, hover_color=_BG4,
+                                 text_color=_ACCENT, font=_FONT_SM, corner_radius=6,
+                                 command=self._open_dashboard)
+        btn_web.pack(side="right")
+        CTkToolTip(btn_web, "Ouvrir le dashboard web avec graphiques dynamiques")
+
+        # Sous-onglets
+        self._stats_tabs = ctk.CTkTabview(
+            parent,
+            fg_color=_BG3,
+            segmented_button_fg_color=_BG4,
+            segmented_button_selected_color=_BG2,
+            segmented_button_unselected_color=_BG4,
+            segmented_button_unselected_hover_color=_BG3,
+            text_color=_FG,
+            corner_radius=8,
+        )
+        self._stats_tabs.pack(fill="both", expand=True, padx=4)
+        self._stats_tabs.add("Historique des runs")
+        self._stats_tabs.add("Stats par bouton")
+        self._stats_tabs._segmented_button.configure(font=_FONT_SM)
 
         # Treeview runs
-        run_cols = ("Run #", "Démarré le", "Total", "✔ OK", "⚠ Ignorées", "✘ Erreurs",
-                    "Avg (ms)", "Max (ms)")
-        sb_r = tk.Scrollbar(runs_tab)
+        runs_frame = ctk.CTkFrame(self._stats_tabs.tab("Historique des runs"),
+                                   fg_color=_BG3, corner_radius=6)
+        runs_frame.pack(fill="both", expand=True)
+        run_cols = ("Run", "Démarré le", "App", "Total", "OK", "Ignorées",
+                    "Erreurs", "Avg ms", "Max ms", "Durée s")
+        sb_r = tk.Scrollbar(runs_frame)
         sb_r.pack(side="right", fill="y")
-        self._runs_tree = ttk.Treeview(runs_tab, columns=run_cols, show="headings",
-                                        style="RPA.Treeview", yscrollcommand=sb_r.set)
+        self._runs_tree = ttk.Treeview(runs_frame, columns=run_cols,
+                                        show="headings", style="V4.Treeview",
+                                        yscrollcommand=sb_r.set)
         for c in run_cols:
             self._runs_tree.heading(c, text=c)
-            self._runs_tree.column(c, width=90, stretch=True)
-        self._runs_tree.column("Run #",      width=55, stretch=False)
-        self._runs_tree.column("Démarré le", width=150, stretch=True)
+        for c, w in [("Run", 50), ("Démarré le", 145), ("App", 100),
+                     ("Total", 55), ("OK", 45), ("Ignorées", 70),
+                     ("Erreurs", 65), ("Avg ms", 70), ("Max ms", 70), ("Durée s", 65)]:
+            self._runs_tree.column(c, width=w, stretch=(c == "App"))
         sb_r.config(command=self._runs_tree.yview)
         self._runs_tree.pack(fill="both", expand=True)
-        for tag, fg in [("ok", GREEN), ("warn", YELLOW), ("error", RED)]:
+        for tag, fg in [("ok", _GREEN), ("warn", _YELLOW), ("error", _RED)]:
             self._runs_tree.tag_configure(tag, foreground=fg)
 
         # Treeview labels
-        lbl_cols = ("Cible", "Type", "Exécutions", "Avg (ms)", "Max (ms)", "Min (ms)", "Taux OK")
-        sb_l = tk.Scrollbar(labels_tab)
+        lbl_frame = ctk.CTkFrame(self._stats_tabs.tab("Stats par bouton"),
+                                  fg_color=_BG3, corner_radius=6)
+        lbl_frame.pack(fill="both", expand=True)
+        lbl_cols = ("Cible", "App", "Type", "Exécutions",
+                    "Avg ms", "Max ms", "Min ms", "Taux OK")
+        sb_l = tk.Scrollbar(lbl_frame)
         sb_l.pack(side="right", fill="y")
-        self._labels_tree = ttk.Treeview(labels_tab, columns=lbl_cols, show="headings",
-                                          style="RPA.Treeview", yscrollcommand=sb_l.set)
+        self._labels_tree = ttk.Treeview(lbl_frame, columns=lbl_cols,
+                                          show="headings", style="V4.Treeview",
+                                          yscrollcommand=sb_l.set)
         for c in lbl_cols:
             self._labels_tree.heading(c, text=c)
-            self._labels_tree.column(c, width=100, stretch=True)
-        self._labels_tree.column("Cible",       width=200, stretch=True)
-        self._labels_tree.column("Type",        width=80,  stretch=False)
-        self._labels_tree.column("Exécutions",  width=80,  stretch=False)
+        for c, w in [("Cible", 200), ("App", 90), ("Type", 75),
+                     ("Exécutions", 80), ("Avg ms", 70),
+                     ("Max ms", 70), ("Min ms", 70), ("Taux OK", 70)]:
+            self._labels_tree.column(c, width=w, stretch=(c == "Cible"))
         sb_l.config(command=self._labels_tree.yview)
         self._labels_tree.pack(fill="both", expand=True)
-        for tag, fg in [("ok", GREEN), ("warn", YELLOW), ("error", RED)]:
+        for tag, fg in [("ok", _GREEN), ("warn", _YELLOW), ("error", _RED)]:
             self._labels_tree.tag_configure(tag, foreground=fg)
 
-        self._stats_summary_lbl = tk.Label(parent, text="", font=FONT_UI,
-                                            bg=BG2, fg=FG2, anchor="w")
-        self._stats_summary_lbl.pack(fill="x", padx=8, pady=(0, 4))
+        self._stats_info_lbl = ctk.CTkLabel(parent, text="",
+                                              font=_FONT_SM, text_color=_FG2,
+                                              anchor="w")
+        self._stats_info_lbl.pack(fill="x", padx=8, pady=(4, 0))
 
-        # Charge la liste des sessions au démarrage
-        self.after(500, self._load_stats_sessions)
+        self.after(800, self._load_stats_sessions)
 
     # ── Moniteurs ──────────────────────────────────────────────────────────────
 
     def _update_monitor_status(self):
         try:
-            self._monitor_var.set(f"🖥  {monitor_summary()}")
+            monitors = get_all_monitors()
+            if len(monitors) == 1:
+                m = monitors[0]
+                txt = f"🖥  {m['width']}×{m['height']}"
+            else:
+                txt = f"🖥  {len(monitors)} écrans"
+            self._monitor_var.set(txt)
         except Exception:
             pass
 
-    # ── Sessions ──────────────────────────────────────────────────────────────
+    # ── Liste des scénarios ───────────────────────────────────────────────────
 
-    def _refresh_session_list(self):
-        self._session_listbox.delete(0, "end")
-        sessions = sorted(SESSIONS_DIR.glob("session_*.json"), reverse=True)
-        for s in sessions:
-            self._session_listbox.insert("end", s.name)
-        if sessions:
-            self._session_listbox.selection_set(0)
-            self._on_session_select(None)
+    def _list_scenario_files(self) -> list[Path]:
+        """Retourne tous les fichiers scénario/session JSON, triés par date desc."""
+        files = []
+        for d in (SCENARIOS_DIR_LOCAL, _LEGACY_SESSIONS_DIR):
+            if d.exists():
+                files.extend(d.glob("*.json"))
+        return sorted(set(files), key=lambda p: p.stat().st_mtime, reverse=True)
 
-    def _on_session_select(self, _event):
-        sel = self._session_listbox.curselection()
-        if not sel:
+    def _refresh_scenario_list(self):
+        for row in self._scenario_rows:
+            row.destroy()
+        self._scenario_rows.clear()
+
+        # Compter les runs par fichier (en DB)
+        db_sessions = {s["filepath"]: s.get("run_count", 0)
+                       for s in stats_db.get_all_sessions()}
+
+        files = self._list_scenario_files()
+        for path in files:
+            run_count = db_sessions.get(str(path.resolve()), 0)
+            row = _ScenarioRow(
+                self._scen_scroll, path, run_count,
+                on_select=self._on_scenario_select,
+                on_delete=self._on_scenario_delete,
+                on_rename=self._on_scenario_rename,
+            )
+            row.pack(fill="x", pady=2)
+            self._scenario_rows.append(row)
+
+    def _on_scenario_select(self, path: Path):
+        for row in self._scenario_rows:
+            row.set_selected(row.scenario_path == path)
+        self._session_path = path
+        self._replay_btn.configure(state="normal")
+        name = self._read_scenario_display_name(path)
+        self._status_var.set(f"Scénario : {name}")
+        self._log_debug(f"✔ Scénario sélectionné : {name}", "info")
+
+    def _on_scenario_delete(self, path: Path):
+        name = self._read_scenario_display_name(path)
+        if not messagebox.askyesno("Supprimer",
+                                    f"Supprimer définitivement le scénario :\n«{name}» ?",
+                                    icon="warning"):
             return
-        name = self._session_listbox.get(sel[0])
-        self._session_path = SESSIONS_DIR / name
-        self._replay_btn.config(state="normal")
-        self._status_var.set(f"Session : {name}")
+        try:
+            path.unlink()
+        except Exception as e:
+            messagebox.showerror("Erreur", str(e))
+            return
+        if self._session_path == path:
+            self._session_path = None
+            self._replay_btn.configure(state="disabled")
+            self._status_var.set("Prêt")
+        self._refresh_scenario_list()
+        self._log_debug(f"🗑 Scénario supprimé : {name}", "warn")
 
-    def _browse_session(self):
+    def _on_scenario_rename(self, path: Path, row: _ScenarioRow):
+        current = self._read_scenario_display_name(path)
+        dialog  = ctk.CTkInputDialog(
+            title="Renommer le scénario",
+            text=f"Nouveau nom pour «{current}» :",
+        )
+        new_name = dialog.get_input()
+        if not new_name or new_name.strip() == current:
+            return
+        new_name = new_name.strip()
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            data["scenario_name"] = new_name
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            row.update_name(new_name)
+            # Mettre à jour en DB
+            stats_db.upsert_session(str(path.resolve()), new_name,
+                                     data.get("action_count", 0))
+            self._log_debug(f"✎ Renommé : {current!r} → {new_name!r}", "ok")
+        except Exception as e:
+            messagebox.showerror("Erreur", str(e))
+
+    def _browse_scenario(self):
         path = filedialog.askopenfilename(
-            title="Choisir une session", initialdir=SESSIONS_DIR,
+            title="Choisir un scénario",
             filetypes=[("JSON", "*.json"), ("Tous", "*.*")],
         )
         if path:
             self._session_path = Path(path)
-            self._replay_btn.config(state="normal")
-            self._status_var.set(f"Session : {Path(path).name}")
+            self._replay_btn.configure(state="normal")
+            name = self._read_scenario_display_name(self._session_path)
+            self._status_var.set(f"Scénario : {name}")
+
+    @staticmethod
+    def _read_scenario_display_name(path: Path) -> str:
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = json.load(f)
+            return d.get("scenario_name") or path.stem
+        except Exception:
+            return path.stem
 
     # ── Enregistrement ────────────────────────────────────────────────────────
 
     def _toggle_record(self):
         if self._recorder is None:
-            self._recorder = ActionRecorder(
-                save_screenshots=self._screenshots_rec_var.get()
-            )
+            name = self._scenario_name_entry.get().strip() or ""
+            self._recorder = ActionRecorder(scenario_name=name)
             self._recorder.start()
-            self._rec_btn.config(text="  ■  STOP RECORD", bg=RED)
-            self._replay_btn.config(state="disabled")
-            self._status_var.set("⬤ Enregistrement en cours…")
-            self._log("⬤ Enregistrement démarré.", "heading")
+            self._rec_btn.configure(text="  ■  STOP RECORD",
+                                     fg_color=_RED, hover_color="#B04050")
+            self._replay_btn.configure(state="disabled")
+            self._status_var.set("⬤ Enregistrement…")
+            self._log_debug("⬤ Enregistrement démarré.", "heading")
+            self._log_official(f"REC  Enregistrement «{name or '(sans nom)'}» démarré", "head")
         else:
             path = self._recorder.stop()
             self._recorder = None
-            self._rec_btn.config(text="  ⬤  RECORD", bg=GREEN)
-            self._log(f"■ Session sauvegardée : {path.name}", "ok")
-            self._status_var.set(f"Session : {path.name}")
-            self._refresh_session_list()
-            self._replay_btn.config(state="normal")
+            self._rec_btn.configure(text="  ⬤  RECORD",
+                                     fg_color=_GREEN, hover_color="#35A07E")
+            name = self._read_scenario_display_name(path)
+            self._log_debug(f"■ Scénario sauvegardé : {path.name}", "ok")
+            self._log_official(f"■  Scénario enregistré : {name}", "ok")
+            self._status_var.set(f"Enregistré : {name}")
+            self._refresh_scenario_list()
+            self._replay_btn.configure(state="normal")
 
     # ── Replay ────────────────────────────────────────────────────────────────
 
     def _start_replay(self):
         if not self._session_path or not self._session_path.exists():
-            messagebox.showwarning("Session introuvable",
-                                   "Sélectionnez ou enregistrez d'abord une session.")
+            messagebox.showwarning("Scénario introuvable",
+                                   "Sélectionnez d'abord un scénario.")
             return
 
-        n_runs   = max(1, self._n_runs_var.get())
+        n_runs   = max(1, self._spin_runs.get())
         interval = max(0.0, self._interval_var.get())
-        capture  = self._screenshots_replay_var.get()
 
         self._results.clear()
-        self._report_json_path = None
-        self._report_html_path = None
+        self._report_json_path = self._report_html_path = None
         self._clear_tree()
-        self._replay_btn.config(state="disabled")
-        self._stop_btn.config(state="normal")
-        self._progress_var.set(0)
+        self._replay_btn.configure(state="disabled")
+        self._stop_btn.configure(state="normal")
+        self._progress_bar.set(0)
         self._current_run_index  = 0
         self._total_runs_planned = n_runs
 
-        run_label = f"Run 1/{n_runs}" if n_runs > 1 else ""
-        self._run_lbl.config(text=run_label)
+        scenario_name = self._read_scenario_display_name(self._session_path)
+        self._run_lbl.configure(text=f"Run 1/{n_runs}" if n_runs > 1 else "")
         self._status_var.set("Replay en cours…")
-        self._notebook.select(0)
+        self._tabs.set("Journal")
+        self._log_tabs.set("Journal officiel")
 
-        tag = "heading" if n_runs == 1 else "run"
-        self._log(f"▶ Replay × {n_runs} — session : {self._session_path.name}", tag)
+        self._log_debug(
+            f"▶ Replay × {n_runs} — scénario : {scenario_name}", "heading")
         if n_runs > 1:
-            self._log(f"  Intervalle entre runs : {interval}s | Screenshots : {capture}", "info")
+            self._log_debug(f"  Intervalle : {interval}s", "info")
 
         if n_runs == 1:
             self._replayer = ActionReplayer(
                 ocr_similarity_min=self._ocr_threshold_var.get(),
-                capture_screenshots=capture,
                 on_progress=self._on_action_progress,
             )
             session = self._replayer.load_session(self._session_path)
             self._total_actions = len(session.get("actions", []))
             self._replay_thread = threading.Thread(
-                target=self._run_single_replay, args=(session,), daemon=True
-            )
+                target=self._run_single, args=(session,), daemon=True)
         else:
             self._multi_runner = MultiReplayRunner(
                 ocr_similarity_min=self._ocr_threshold_var.get(),
-                capture_screenshots=capture,
                 on_run_start=self._on_multi_run_start,
                 on_run_done=self._on_multi_run_done,
                 on_progress=self._on_action_progress,
             )
-            # Lit le session une fois pour connaître le total
             with open(self._session_path, encoding="utf-8") as f:
                 _s = json.load(f)
             self._total_actions = len(_s.get("actions", []))
             self._replay_thread = threading.Thread(
-                target=self._run_multi_replay,
-                args=(n_runs, interval),
-                daemon=True,
-            )
+                target=self._run_multi, args=(n_runs, interval), daemon=True)
 
         self._replay_thread.start()
 
-    def _run_single_replay(self, session: dict):
+    def _run_single(self, session: dict):
         try:
-            results  = self._replayer.replay(session)
+            results    = self._replayer.replay(session)
             self._results = results
-            json_path = self._replayer.save_report(self._session_path)
-            html_path = Path(str(json_path).replace(".json", ".html"))
+            json_path  = self._replayer.save_report(self._session_path)
+            html_path  = Path(str(json_path).replace(".json", ".html"))
             self._replayer.save_to_db(self._session_path)
             self.after(0, self._on_replay_done, results, json_path, html_path)
         except Exception as e:
-            self.after(0, self._log, f"ERREUR replay : {e}", "error")
+            self.after(0, self._log_debug, f"ERREUR replay : {e}", "error")
             self.after(0, self._on_replay_finished)
 
-    def _run_multi_replay(self, n_runs: int, interval: float):
+    def _run_multi(self, n_runs: int, interval: float):
         try:
             all_res = self._multi_runner.run_n_times(
-                self._session_path, n=n_runs, interval_s=interval, save_to_db=True
-            )
-            # Dernier run → rapport HTML
-            if all_res:
-                last_results = all_res[-1]
-                self._results = last_results
-                # Crée un replayer factice pour générer le rapport HTML du dernier run
-                rep = ActionReplayer(capture_screenshots=False)
-                rep._results = last_results
+                self._session_path, n=n_runs, interval_s=interval, save_to_db=True)
+            last = all_res[-1] if all_res else []
+            self._results = last
+            json_path = html_path = None
+            if last:
+                rep = ActionReplayer()
+                rep._results = last
                 json_path = rep.save_report(self._session_path)
                 html_path = Path(str(json_path).replace(".json", ".html"))
-            else:
-                json_path = html_path = None
             self.after(0, self._on_multi_all_done, all_res, json_path, html_path)
         except Exception as e:
-            self.after(0, self._log, f"ERREUR multi-run : {e}", "error")
+            self.after(0, self._log_debug, f"ERREUR multi-run : {e}", "error")
             self.after(0, self._on_replay_finished)
 
     def _stop_replay(self):
@@ -602,33 +990,31 @@ class App(tk.Tk):
             self._replayer.stop()
         if self._multi_runner:
             self._multi_runner.stop()
-        self._log("■ Replay interrompu par l'utilisateur.", "warn")
+        self._log_debug("■ Replay interrompu.", "warn")
 
-    def _on_multi_run_start(self, run_idx: int, total: int):
-        self._current_run_index = run_idx
-        self.after(0, self._run_lbl.config, {"text": f"Run {run_idx}/{total}"})
-        self.after(0, self._log,
-                   f"═══ Run {run_idx}/{total} ═══", "run")
-        self.after(0, self._progress_var.set, 0)
+    def _on_multi_run_start(self, idx: int, total: int):
+        self._current_run_index = idx
+        self.after(0, self._run_lbl.configure, {"text": f"Run {idx}/{total}"})
+        self.after(0, self._log_debug, f"═══ Run {idx}/{total} ═══", "run")
+        self.after(0, self._progress_bar.set, 0)
         self.after(0, self._clear_tree)
 
-    def _on_multi_run_done(self, run_idx: int, total: int, results: list[ActionResult]):
+    def _on_multi_run_done(self, idx: int, total: int, results: list[ActionResult]):
         ok    = sum(1 for r in results if r.status == "ok")
-        times = [r.response_time_ms for r in results if r.response_time_ms is not None]
-        avg_t = f"{sum(times)/len(times):.0f}ms" if times else "—"
-        self.after(0, self._log,
-                   f"✔ Run {run_idx}/{total} terminé — OK:{ok}/{len(results)} avg:{avg_t}", "ok")
-        self.after(0, self._update_summary, results)
-        if run_idx == total:
-            self.after(0, self._load_stats_sessions)
+        times = [r.response_time_ms for r in results if r.response_time_ms]
+        avg   = f"{sum(times)/len(times):.0f}ms" if times else "—"
+        self.after(0, self._log_debug,
+                   f"✔ Run {idx}/{total} — OK:{ok}/{len(results)} avg:{avg}", "ok")
+        self.after(0, self._update_report_summary, results)
+        self.after(0, self._refresh_stats_silent)
 
     def _on_action_progress(self, current: int, total: int, result: ActionResult):
         self.after(0, self._update_progress, current, total, result)
 
     def _update_progress(self, current: int, total: int, result: ActionResult):
-        pct = (current / total * 100) if total > 0 else 0
-        self._progress_var.set(pct)
-        self._progress_lbl.config(text=f"{current} / {total}")
+        pct = (current / total) if total > 0 else 0
+        self._progress_bar.set(pct)
+        self._progress_lbl.configure(text=f"{current}/{total}")
 
         label = result.label or ""
         if result.skipped:
@@ -636,13 +1022,12 @@ class App(tk.Tk):
         elif result.error:
             tag, status = "error", f"ERREUR — {result.error}"
         else:
-            rt   = f"{result.response_time_ms:.0f}ms" if result.response_time_ms is not None else "—"
+            rt = f"{result.response_time_ms:.0f}ms" if result.response_time_ms else "—"
             tag, status = "ok", f"OK  ⏱ {rt}"
 
         label_part = f"  [{label}]" if label else ""
-        msg = (f"[{result.index:>3}] {result.action_type:<14}"
-               f"{label_part:<22}  {status}")
-        self._log(msg, tag)
+        self._log_debug(
+            f"[{result.index:>3}] {result.action_type:<14}{label_part:<22}  {status}", tag)
         self._add_tree_row(result)
 
     def _on_replay_done(self, results: list[ActionResult],
@@ -650,134 +1035,222 @@ class App(tk.Tk):
         self._report_json_path = json_path
         self._report_html_path = html_path if html_path and html_path.exists() else None
         self._on_replay_finished()
-        self._log(f"✔ Replay terminé. JSON: {json_path.name}", "ok")
-        if self._report_html_path:
-            self._log(f"   HTML: {html_path.name}", "ok")
+
+        scenario_name = self._read_scenario_display_name(self._session_path)
+        self._log_debug(f"✔ Replay terminé. JSON : {json_path.name}", "ok")
         self._status_var.set("Replay terminé.")
-        self._notebook.select(1)
-        self._update_summary(results)
+        self._tabs.set("Rapport")
+        self._update_report_summary(results)
+        self._load_official_log()
         self._load_stats_sessions()
+        self.after(200, self._refresh_stats_silent)
 
     def _on_multi_all_done(self, all_res, json_path, html_path):
         n = len(all_res)
-        self._log(f"✔ {n} run(s) terminés — données persistées en DB.", "run")
+        self._log_debug(f"✔ {n} run(s) terminés — persistés en DB.", "run")
         if json_path:
             self._report_json_path = json_path
             self._report_html_path = html_path if html_path and html_path.exists() else None
         self._on_replay_finished()
         self._status_var.set(f"{n} run(s) terminé(s).")
-        self._notebook.select(2)   # → onglet Stats
+        self._load_official_log()
         self._load_stats_sessions()
+        self.after(200, lambda: (self._tabs.set("Stats long-terme"),
+                                  self._refresh_stats_silent()))
 
     def _on_replay_finished(self):
-        self._replay_btn.config(state="normal")
-        self._stop_btn.config(state="disabled")
-        self._progress_var.set(100)
-        self._run_lbl.config(text="")
+        self._replay_btn.configure(state="normal")
+        self._stop_btn.configure(state="disabled")
+        self._progress_bar.set(1)
+        self._run_lbl.configure(text="")
 
     # ── Rapport ───────────────────────────────────────────────────────────────
 
     def _add_tree_row(self, r: ActionResult):
-        ocr_score = f"{r.ocr_match:.2f}" if r.ocr_match is not None else "—"
-        visual_ok = "✔" if r.visual_ok else ("✘" if r.visual_ok is False else "—")
-        resp      = f"{r.response_time_ms:.0f}" if r.response_time_ms is not None else "—"
-        label     = r.label or "—"
-
-        if r.skipped:
-            tag, status = "warn", "IGNORÉ"
-        elif r.error:
-            tag, status = "error", r.error[:50]
-        else:
-            tag, status = "ok", "OK"
-
+        ocr  = f"{r.ocr_match:.2f}" if r.ocr_match is not None else "—"
+        vis  = "✔" if r.visual_ok else ("✘" if r.visual_ok is False else "—")
+        resp = f"{r.response_time_ms:.0f}" if r.response_time_ms is not None else "—"
+        tag, status = (("warn", "IGNORÉ") if r.skipped
+                       else (("error", r.error[:40]) if r.error else ("ok", "OK")))
         iid = self._tree.insert("", "end",
-                                 values=(r.index, r.action_type, label,
-                                         ocr_score, visual_ok, resp, status))
+                                 values=(r.index, r.action_type,
+                                         r.label or "—", ocr, vis, resp, status))
         self._tree.item(iid, tags=(tag,))
 
     def _clear_tree(self):
         for item in self._tree.get_children():
             self._tree.delete(item)
-        self._summary_lbl.config(text="")
+        self._report_summary_lbl.configure(text="")
 
-    def _update_summary(self, results: list[ActionResult]):
-        total  = len(results)
-        ok     = sum(1 for r in results if r.status == "ok")
-        skip   = sum(1 for r in results if r.status == "skip")
-        errors = sum(1 for r in results if r.status == "error")
-        times  = [r.response_time_ms for r in results if r.response_time_ms is not None]
-        avg_t  = f"{sum(times)/len(times):.0f}ms" if times else "—"
-        max_t  = f"{max(times):.0f}ms" if times else "—"
-        self._summary_lbl.config(
-            text=f"Total {total}  ✔ OK {ok}  ⚠ Ignorées {skip}  ✘ Erreurs {errors}"
-                 f"   ⏱ Avg {avg_t}  Max {max_t}"
-        )
+    def _update_report_summary(self, results: list[ActionResult]):
+        total = len(results)
+        ok    = sum(1 for r in results if r.status == "ok")
+        skip  = sum(1 for r in results if r.status == "skip")
+        errs  = sum(1 for r in results if r.status == "error")
+        times = [r.response_time_ms for r in results if r.response_time_ms]
+        avg_t = f"{sum(times)/len(times):.0f}ms" if times else "—"
+        max_t = f"{max(times):.0f}ms" if times else "—"
+        self._report_summary_lbl.configure(
+            text=f"Total {total}  ✔{ok}  ⚠{skip}  ✘{errs}   ⏱ avg {avg_t}  max {max_t}")
 
     def _export_report_json(self):
         if not self._results:
             messagebox.showinfo("Rapport vide", "Aucun résultat disponible.")
             return
         path = filedialog.asksaveasfilename(
-            title="Exporter le rapport JSON", initialdir=REPORTS_DIR,
-            defaultextension=".json", filetypes=[("JSON", "*.json")],
-        )
+            title="Exporter JSON", initialdir=REPORTS_DIR,
+            defaultextension=".json", filetypes=[("JSON", "*.json")])
         if path:
-            data = [r.to_dict() for r in self._results]
             with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            self._log(f"Rapport JSON exporté → {path}", "ok")
+                json.dump([r.to_dict() for r in self._results],
+                          f, ensure_ascii=False, indent=2)
+            self._log_debug(f"Rapport JSON → {path}", "ok")
 
     def _export_report_html(self):
         if not self._results:
             messagebox.showinfo("Rapport vide", "Aucun résultat disponible.")
             return
         if self._report_html_path and self._report_html_path.exists():
-            ans = messagebox.askyesnocancel(
-                "Rapport HTML",
-                f"Rapport existant : {self._report_html_path.name}\nOuvrir ce fichier ?",
-            )
-            if ans is None:
+            if messagebox.askyesno("HTML existant",
+                                    f"Ouvrir {self._report_html_path.name} ?"):
+                webbrowser.open(self._report_html_path.as_uri())
                 return
-            if ans:
-                self._open_html(self._report_html_path)
-                return
-
         path = filedialog.asksaveasfilename(
-            title="Exporter le rapport HTML", initialdir=REPORTS_DIR,
-            defaultextension=".html", filetypes=[("HTML", "*.html")],
-        )
+            title="Exporter HTML", initialdir=REPORTS_DIR,
+            defaultextension=".html", filetypes=[("HTML", "*.html")])
         if not path:
             return
         rep = ActionReplayer()
         rep._results = self._results
         ts   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        stem = (self._session_path.stem if self._session_path else "session")
-        html = rep._build_html_report(rep._build_report_dict(
-            self._session_path or Path("session.json"), ts), stem, ts)
+        stem = (self._session_path.stem if self._session_path else "scenario")
+        html = rep._build_html_report(
+            rep._build_report_dict(self._session_path or Path("scenario.json"), ts),
+            stem, ts)
         Path(path).write_text(html, encoding="utf-8")
-        self._log(f"Rapport HTML exporté → {path}", "ok")
-        self._open_html(Path(path))
+        self._log_debug(f"Rapport HTML → {path}", "ok")
+        webbrowser.open(Path(path).as_uri())
 
-    # ── Stats long-terme ──────────────────────────────────────────────────────
+    # ── Journal officiel ──────────────────────────────────────────────────────
 
-    def _load_stats_sessions(self):
+    def _load_official_log(self):
+        """Recharge les entrées du journal officiel dans la textbox."""
         try:
-            sessions = stats_db.get_all_sessions()
-            values   = [f"{s['name']}  (id={s['id']}, {s.get('run_count',0)} runs)"
-                        for s in sessions]
-            self._stats_session_cb["values"] = values
-            self._stats_sessions_data        = sessions
-            if sessions and not self._stats_session_var.get():
-                self._stats_session_cb.current(0)
-                self._refresh_stats()
+            entries = official_log.get_recent_entries(200)
+            self._official_log_box.configure(state="normal")
+            self._official_log_box.delete("0.0", "end")
+            for e in entries:
+                status = e.get("status", "")
+                tag = ("ok" if status == "SUCCÈS"
+                       else ("warn" if status == "PARTIEL" else "err"))
+                icon = "✔" if status == "SUCCÈS" else ("⚠" if status == "PARTIEL" else "✘")
+                ok_t = e.get("ok_count", "?")
+                tot  = e.get("total_count", "?")
+                dur  = e.get("duration_s", "?")
+                line = (f"[{e.get('execution_date','')[:19]}] "
+                        f"{icon} {status:<8}  "
+                        f"{e.get('app_name','—'):<16}  "
+                        f"{e.get('scenario_name','—'):<24}  "
+                        f"{ok_t}/{tot} actions  "
+                        f"⏱ {dur}s\n")
+                self._official_log_box._textbox.configure(state="normal")
+                self._official_log_box._textbox.insert("end", line, tag)
+                self._official_log_box._textbox.configure(state="disabled")
+            self._official_log_box.configure(state="disabled")
         except Exception:
             pass
 
-    def _refresh_stats(self):
-        idx = self._stats_session_cb.current()
-        if idx < 0 or not hasattr(self, "_stats_sessions_data"):
+    def _export_official_csv(self):
+        paths = official_log.get_all_log_paths()
+        if not paths:
+            messagebox.showinfo("Aucun log", "Aucun journal officiel disponible.")
             return
-        sessions = self._stats_sessions_data
+        # Propose le fichier le plus récent
+        dst = filedialog.asksaveasfilename(
+            title="Exporter le journal officiel",
+            initialdir=Path("logs"),
+            initialfile=paths[0].name,
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv"), ("Tous", "*.*")],
+        )
+        if dst:
+            import shutil
+            shutil.copy2(paths[0], dst)
+            self._log_debug(f"Journal officiel exporté → {dst}", "ok")
+
+    # ── Stats long-terme ──────────────────────────────────────────────────────
+
+    def _on_tab_changed(self):
+        try:
+            if self._tabs.get() == "Stats long-terme":
+                self._refresh_stats_silent()
+        except Exception:
+            pass
+
+    def _load_stats_sessions(self):
+        """Charge la liste des sessions de la DB dans le combobox."""
+        try:
+            sessions = stats_db.get_all_sessions()
+            self._stats_sessions_data = sessions
+            values = []
+            for s in sessions:
+                sname = s.get("scenario_name") or s.get("name") or "—"
+                values.append(f"{sname}  (id={s['id']}, {s.get('run_count',0)} runs)")
+            self._stats_session_cb.configure(values=values)
+            if values and not self._stats_session_var.get():
+                self._stats_session_cb.set(values[0])
+                self._refresh_stats_silent()
+            elif values:
+                # Réactualise la sélection courante sans reset
+                self._refresh_stats_silent()
+        except Exception as e:
+            self._log_debug(f"[stats] Erreur chargement sessions : {e}", "error")
+
+    def _refresh_stats_full(self):
+        """Recharge sessions ET rafraîchit l'affichage."""
+        self._load_stats_sessions()
+
+    def _refresh_stats_silent(self):
+        """Rafraîchit l'affichage sans modifier le combobox."""
+        try:
+            if not hasattr(self, "_stats_sessions_data"):
+                self._load_stats_sessions()
+                return
+            sessions = self._stats_sessions_data
+            if not sessions:
+                return
+            # Trouver l'index sélectionné
+            cur_val = self._stats_session_var.get()
+            idx = 0
+            for i, s in enumerate(sessions):
+                sname = s.get("scenario_name") or s.get("name") or "—"
+                if sname in cur_val or str(s["id"]) in cur_val:
+                    idx = i
+                    break
+            self._refresh_stats_for_index(idx)
+        except Exception as e:
+            self._log_debug(f"[stats] Erreur refresh : {e}", "error")
+
+    def _refresh_stats(self):
+        """Appelé par le combobox."""
+        try:
+            sessions = getattr(self, "_stats_sessions_data", [])
+            if not sessions:
+                self._load_stats_sessions()
+                return
+            cur_val = self._stats_session_var.get()
+            idx = 0
+            for i, s in enumerate(sessions):
+                sname = s.get("scenario_name") or s.get("name") or "—"
+                if sname in cur_val or str(s["id"]) in cur_val:
+                    idx = i
+                    break
+            self._refresh_stats_for_index(idx)
+        except Exception as e:
+            self._log_debug(f"[stats] Erreur : {e}", "error")
+
+    def _refresh_stats_for_index(self, idx: int):
+        sessions = getattr(self, "_stats_sessions_data", [])
         if idx >= len(sessions):
             return
         sid = sessions[idx]["id"]
@@ -785,60 +1258,74 @@ class App(tk.Tk):
         # Runs
         for item in self._runs_tree.get_children():
             self._runs_tree.delete(item)
-        runs = stats_db.get_session_runs(sid)
-        for r in runs:
-            pct = (r["ok_count"] * 100 // r["total"]) if r.get("total") else 0
-            tag = "ok" if pct == 100 else ("warn" if pct >= 70 else "error")
-            avg = f"{r['avg_response_ms']:.0f}" if r.get("avg_response_ms") is not None else "—"
-            mx  = f"{r['max_response_ms']:.0f}" if r.get("max_response_ms") is not None else "—"
-            iid = self._runs_tree.insert("", "end", values=(
-                f"#{r['run_number']}",
-                (r["started_at"] or "").replace("T", " ")[:19],
-                r.get("total", "—"),
-                r["ok_count"],
-                r["skip_count"],
-                r["error_count"],
-                avg,
-                mx,
-            ))
-            self._runs_tree.item(iid, tags=(tag,))
+        try:
+            runs = stats_db.get_session_runs(sid)
+            for r in runs:
+                pct = (r["ok_count"] * 100 // r["total"]) if r.get("total") else 0
+                tag = "ok" if pct == 100 else ("warn" if pct >= 70 else "error")
+                avg = f"{r['avg_response_ms']:.0f}" if r.get("avg_response_ms") else "—"
+                mx  = f"{r['max_response_ms']:.0f}" if r.get("max_response_ms") else "—"
+                dur = f"{r['total_duration_s']:.1f}" if r.get("total_duration_s") else "—"
+                # Récupérer app_name depuis les résultats du run
+                actions = stats_db.get_run_actions(r["id"])
+                app = next((a["app_name"] for a in actions if a.get("app_name")), "—")
+                iid = self._runs_tree.insert("", "end", values=(
+                    f"#{r['run_number']}",
+                    (r["started_at"] or "").replace("T", " ")[:19],
+                    app,
+                    r.get("total", "—"),
+                    r["ok_count"], r["skip_count"], r["error_count"],
+                    avg, mx, dur,
+                ))
+                self._runs_tree.item(iid, tags=(tag,))
+        except Exception as e:
+            self._log_debug(f"[stats/runs] {e}", "error")
 
         # Labels
         for item in self._labels_tree.get_children():
             self._labels_tree.delete(item)
-        label_stats = stats_db.get_label_stats(sid)
-        for l in label_stats:
-            sr  = l.get("success_rate") or 0
-            tag = "ok" if sr >= 95 else ("warn" if sr >= 70 else "error")
-            avg = f"{l['avg_ms']:.0f}" if l.get("avg_ms") is not None else "—"
-            mx  = f"{l['max_ms']:.0f}" if l.get("max_ms") is not None else "—"
-            mn  = f"{l['min_ms']:.0f}" if l.get("min_ms") is not None else "—"
-            iid = self._labels_tree.insert("", "end", values=(
-                l.get("label") or "—",
-                l.get("action_type") or "—",
-                l.get("run_count", "—"),
-                avg, mx, mn,
-                f"{sr:.1f}%",
-            ))
-            self._labels_tree.item(iid, tags=(tag,))
+        try:
+            label_stats = stats_db.get_label_stats(sid)
+            for l in label_stats:
+                sr  = l.get("success_rate") or 0
+                tag = "ok" if sr >= 95 else ("warn" if sr >= 70 else "error")
+                avg = f"{l['avg_ms']:.0f}" if l.get("avg_ms") else "—"
+                mx  = f"{l['max_ms']:.0f}" if l.get("max_ms") else "—"
+                mn  = f"{l['min_ms']:.0f}" if l.get("min_ms") else "—"
+                iid = self._labels_tree.insert("", "end", values=(
+                    l.get("label") or "—",
+                    l.get("app_name") or "—",
+                    l.get("action_type") or "—",
+                    l.get("run_count", "—"),
+                    avg, mx, mn,
+                    f"{sr:.1f}%",
+                ))
+                self._labels_tree.item(iid, tags=(tag,))
+        except Exception as e:
+            self._log_debug(f"[stats/labels] {e}", "error")
 
         s = sessions[idx]
-        self._stats_summary_lbl.config(
-            text=f"{s['name']} — {s.get('run_count',0)} run(s) — "
-                 f"{s.get('action_count',0)} actions"
-        )
+        sname = s.get("scenario_name") or s.get("name") or "—"
+        self._stats_info_lbl.configure(
+            text=f"{sname} — {s.get('run_count',0)} run(s) — "
+                 f"{s.get('action_count',0)} actions")
 
     def _export_csv(self):
-        idx = self._stats_session_cb.current()
-        if idx < 0 or not hasattr(self, "_stats_sessions_data"):
-            messagebox.showinfo("Aucune session", "Sélectionnez une session dans la liste.")
+        sessions = getattr(self, "_stats_sessions_data", [])
+        if not sessions:
+            messagebox.showinfo("Aucune session", "Sélectionnez un scénario.")
             return
-        sid  = self._stats_sessions_data[idx]["id"]
-        name = self._stats_sessions_data[idx]["name"]
+        cur_val = self._stats_session_var.get()
+        idx, sid, sname = 0, sessions[0]["id"], "export"
+        for i, s in enumerate(sessions):
+            n = s.get("scenario_name") or s.get("name") or "—"
+            if n in cur_val or str(s["id"]) in cur_val:
+                idx, sid, sname = i, s["id"], n
+                break
         path = filedialog.asksaveasfilename(
-            title="Exporter le CSV", initialdir=REPORTS_DIR,
+            title="Exporter CSV", initialdir=REPORTS_DIR,
             defaultextension=".csv",
-            initialfile=f"{name}_export.csv",
+            initialfile=f"{sname}_export.csv",
             filetypes=[("CSV", "*.csv"), ("Tous", "*.*")],
         )
         if not path:
@@ -846,7 +1333,7 @@ class App(tk.Tk):
         try:
             csv_data = stats_db.export_csv(sid)
             Path(path).write_text(csv_data, encoding="utf-8-sig")
-            self._log(f"CSV exporté → {path}", "ok")
+            self._log_debug(f"CSV exporté → {path}", "ok")
         except Exception as e:
             messagebox.showerror("Erreur CSV", str(e))
 
@@ -855,46 +1342,56 @@ class App(tk.Tk):
     def _open_dashboard(self):
         global _SERVER_PROC, _SERVER_PORT
         url = f"http://127.0.0.1:{_SERVER_PORT}/"
-
         if _SERVER_PROC is None or _SERVER_PROC.poll() is not None:
             try:
                 _SERVER_PROC = subprocess.Popen(
                     [sys.executable, "report_server.py", f"--port={_SERVER_PORT}"],
                     cwd=Path(__file__).parent,
                 )
-                self._log(f"🌐 Dashboard lancé → {url}", "heading")
+                self._log_debug(f"🌐 Dashboard lancé → {url}", "heading")
                 self.after(1500, lambda: webbrowser.open(url))
             except Exception as e:
-                messagebox.showerror("Erreur Dashboard", str(e))
+                messagebox.showerror("Dashboard", str(e))
         else:
-            self._log(f"🌐 Dashboard déjà actif → {url}", "info")
+            self._log_debug(f"🌐 Dashboard actif → {url}", "info")
             webbrowser.open(url)
 
-    # ── Journal ───────────────────────────────────────────────────────────────
+    # ── Journaux ──────────────────────────────────────────────────────────────
 
-    def _log(self, message: str, tag: str = "info"):
+    def _log_debug(self, message: str, tag: str = "info"):
         ts   = datetime.datetime.now().strftime("%H:%M:%S")
         line = f"[{ts}] {message}\n"
-        self._log_text.config(state="normal")
-        self._log_text.insert("end", line, tag)
-        self._log_text.see("end")
-        self._log_text.config(state="disabled")
+        try:
+            box = self._debug_log_box._textbox
+            box.configure(state="normal")
+            box.insert("end", line, tag)
+            box.see("end")
+            box.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _log_official(self, message: str, tag: str = "head"):
+        ts   = datetime.datetime.now().strftime("%H:%M:%S")
+        line = f"[{ts}] {message}\n"
+        try:
+            box = self._official_log_box._textbox
+            box.configure(state="normal")
+            box.insert("end", line, tag)
+            box.see("end")
+            box.configure(state="disabled")
+        except Exception:
+            pass
 
     # ── Utilitaires ───────────────────────────────────────────────────────────
 
     @staticmethod
     def _open_folder(path: Path):
-        import os
         if sys.platform == "win32":
             os.startfile(str(path))
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(path)])
         else:
             subprocess.Popen(["xdg-open", str(path)])
-
-    @staticmethod
-    def _open_html(path: Path):
-        webbrowser.open(path.as_uri())
 
     def _on_close(self):
         global _SERVER_PROC

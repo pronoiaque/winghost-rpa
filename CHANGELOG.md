@@ -5,6 +5,70 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [4.0.0] — 2026-06-12
+
+### Ajouté
+
+#### 🎨 Interface CustomTkinter — refonte complète de `gui.py`
+- Migration Tkinter → **CustomTkinter** : thème dark arrondi, widgets CTk natifs (`CTkFrame`, `CTkButton`, `CTkEntry`, `CTkLabel`, `CTkSlider`, `CTkTabview`, `CTkScrollableFrame`, `CTkInputDialog`)
+- `CTkToolTip` : bulles d'aide sur tous les boutons et contrôles (délai 600 ms, disparition au clic/mouvement)
+- `_Spinbox` : composant spinbox personnalisé (boutons −/+, validation entier 1–99)
+- `_ScenarioRow` : ligne de liste de scénario avec icône 🎬, badge compteur de runs, bouton renommer ✎ et bouton supprimer 🗑
+- Champ **Nom du scénario** en haut du panneau gauche — prérempli automatiquement pour chaque enregistrement
+
+#### 🗂️ Gestion des scénarios
+- **Renommer** un scénario (✎) : dialogue `CTkInputDialog`, mise à jour du JSON et de la DB SQLite
+- **Supprimer** un scénario (🗑) : confirmation, suppression du fichier JSON
+- Fichiers sauvegardés dans `scenarios/` (format `scenario_YYYYMMDD_HHMMSS.json`) — `sessions/` conservé pour rétrocompatibilité v1/v2
+
+#### 📋 Log officiel CSV (`official_log.py`, nouveau)
+- `LOGS_DIR = Path("logs")` — fichiers mensuels `logs/official_YYYYMM.csv`
+- Séparateur `;`, encodage UTF-8 BOM (compatible Excel)
+- Colonnes : `app_name`, `scenario_name`, `execution_date`, `duration_s`, `status`, `ok_count`, `total_count`, `run_id`
+- Statuts : `SUCCÈS` (100 % OK), `PARTIEL` (≥ 1 skip, 0 erreur), `ÉCHEC` (≥ 1 erreur)
+- `init_logs()`, `append_entry(...)`, `get_recent_entries(max_lines=200)`, `get_all_log_paths()`
+- Écrit automatiquement à la fin de chaque `save_to_db()` dans `replayer.py`
+
+#### 🪵 Log dual (Journal officiel + Log debug)
+- L'onglet **Journal** contient désormais un `CTkTabview` interne :
+  - **Journal officiel** : tableau des exécutions chargé depuis `official_log.get_recent_entries()`, rafraîchi après chaque replay
+  - **Log debug** : journal technique temps réel (actions, scores OCR, erreurs, screenshots), accessible à la demande
+
+#### 📸 Screenshots systématiques (160 px)
+- Option `capture_screenshots` supprimée — capture toujours active, région 160 px (était 120 px)
+- `ActionReplayer` et `MultiReplayRunner` : paramètre `capture_screenshots` retiré de l'API
+- `SCREENSHOT_REGION_PAD = 160` dans `replayer.py`
+
+#### 🖥️ Nom d'application capturé (`app_name`)
+- `get_foreground_app() -> str` dans `recorder.py` : nom du processus Windows en premier plan via `win32gui` + `win32process` + `psutil` ; repli gracieux sur `""` si absents
+- Champ `app_name` ajouté dans `Action` (recorder), `ActionResult` (replayer), `action_results` (DB), `export_csv()` (DB)
+- Affiché dans le log officiel (application la plus fréquente du run, via `Counter`)
+
+#### 📊 Stats long-terme — corrections profondes
+- `_refresh_stats_silent()` : actualisation sans réinitialiser la combobox
+- `_refresh_stats_for_index()` : requêtes DB avec `try/except` par treeview, logs d'erreur explicites
+- Auto-actualisation à chaque changement d'onglet (`_on_tab_changed`) et après chaque replay terminé
+- `_load_stats_sessions()` appelé au démarrage (délai 800 ms)
+
+### Modifié
+- `recorder.py` : `SCENARIOS_DIR = Path("scenarios")` — sauvegarde dans `scenarios/`, version JSON `"3.0"`, champ `scenario_name`, champ `app_name` par action, `SCREENSHOT_PADDING = 160`, screenshots toujours capturés
+- `replayer.py` : `write_official_log()` méthode publique — calcule durée, statut, app dominante ; appelée par `save_to_db()` ; `_last_session` stocké après `load_session()` ; `SCENARIOS_DIR` en priorité dans la recherche CLI
+- `stats_db.py` : colonnes `scenario_name` (sessions), `total_duration_s` (runs), `app_name` (action_results) ; fonction `_migrate(conn)` pour bases existantes ; tous les accesseurs mis à jour
+- `gui.py` : titre → `WinGhost RPA v4`, layout 1020×750, `_log_debug()` / `_log_official()` pour les deux canaux
+- `requirements.txt` : ajout `customtkinter>=5.2.0`, `pywin32>=306` (opt.), `psutil>=5.9.0` (opt.)
+- `pyproject.toml` : version `4.0.0`
+
+### Supprimé
+- Checkbox **Capturer screenshots post-action** dans le GUI (screenshots toujours actifs)
+- Paramètre `capture_screenshots` dans `ActionReplayer` et `MultiReplayRunner`
+
+### Compatibilité
+- Sessions v1 (`"1.0"`), v2 (`"2.0"`) et v3 (`"3.0"`) entièrement compatibles en replay
+- Base SQLite existante migrée automatiquement au premier démarrage (`_migrate`)
+- `sessions/` toujours lu pour rétrocompatibilité (`_list_scenario_files`)
+
+---
+
 ## [3.0.0] — 2026-06-11
 
 ### Ajouté

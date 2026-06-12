@@ -15,8 +15,15 @@ numpy>=1.24.0
 # Multi-moniteurs (optionnel — repli gracieux si absent)
 screeninfo>=0.8.1
 
-# Dashboard web (v3)
+# Dashboard web (v3+)
 flask>=3.0.0
+
+# Interface graphique moderne (v4)
+customtkinter>=5.2.0
+
+# Capture du nom d'application Windows (v4, optionnel — Windows uniquement)
+pywin32>=306
+psutil>=5.9.0
 
 # (optionnel) accélération GPU pour EasyOCR
 # torch>=2.0.0        # décommenter si GPU CUDA disponible
