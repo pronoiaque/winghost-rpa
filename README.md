@@ -97,8 +97,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-> **`pywin32` / `psutil`** : requis pour capturer le nom de l'application active (Windows uniquement). Si absents, la valeur sera `""` sans erreur.  
-> **`screeninfo`** : optionnel pour la détection multi-moniteurs.
+> **Windows uniquement** : `pywin32` et `psutil` capturent le nom de l'application active ; `screeninfo` clippe les screenshots aux limites de chaque moniteur. Tous trois sont désormais des dépendances standard.
 
 ---
 
@@ -267,9 +266,9 @@ Chaque rapport HTML standalone inclut :
 | `numpy` | Comparaison pixel-à-pixel |
 | `customtkinter` | Interface graphique moderne (v4) |
 | `flask` | Dashboard web dynamique |
-| `pywin32` | Capture du nom d'application Windows *(optionnel)* |
-| `psutil` | Fallback nom de processus *(optionnel)* |
-| `screeninfo` | Détection multi-moniteurs *(optionnel)* |
+| `pywin32` | Capture du nom d'application Windows en premier plan |
+| `psutil` | Résolution du nom de processus depuis le PID |
+| `screeninfo` | Détection multi-moniteurs (clipping des screenshots) |
 
 ---
 

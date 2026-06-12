@@ -55,8 +55,8 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 - `replayer.py` : `write_official_log()` méthode publique — calcule durée, statut, app dominante ; appelée par `save_to_db()` ; `_last_session` stocké après `load_session()` ; `SCENARIOS_DIR` en priorité dans la recherche CLI
 - `stats_db.py` : colonnes `scenario_name` (sessions), `total_duration_s` (runs), `app_name` (action_results) ; fonction `_migrate(conn)` pour bases existantes ; tous les accesseurs mis à jour
 - `gui.py` : titre → `WinGhost RPA v4`, layout 1020×750, `_log_debug()` / `_log_official()` pour les deux canaux
-- `requirements.txt` : ajout `customtkinter>=5.2.0`, `pywin32>=306` (opt.), `psutil>=5.9.0` (opt.)
-- `pyproject.toml` : version `4.0.0`
+- `requirements.txt` : ajout `customtkinter>=5.2.0`, `pywin32>=306`, `psutil>=5.9.0` (dépendances standard, plus optionnelles) ; `screeninfo` reclassé en dépendance standard
+- `pyproject.toml` : version `4.0.0` ; `dependencies` complétées avec `screeninfo`, `flask`, `customtkinter`, `pywin32`, `psutil`
 
 ### Supprimé
 - Checkbox **Capturer screenshots post-action** dans le GUI (screenshots toujours actifs)

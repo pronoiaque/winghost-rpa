@@ -34,6 +34,11 @@ dependencies = [
     "easyocr>=1.7.1",
     "Pillow>=10.0.0",
     "numpy>=1.24.0",
+    "screeninfo>=0.8.1",
+    "flask>=3.0.0",
+    "customtkinter>=5.2.0",
+    "pywin32>=306",
+    "psutil>=5.9.0",
 ]
 
 [project.urls]
