@@ -1,23 +1,44 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"
-     width="100" height="100" role="img" aria-label="CHU Toulouse">
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Logo CHU de Toulouse — reconstruction fidèle du SVG officiel -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     viewBox="0 0 113.3858 56.6924" role="img" aria-label="CHU de Toulouse">
   <defs>
-    <linearGradient id="chuShell" x1="0" y1="0" x2="1" y2="0.25">
-      <stop offset="0%"  stop-color="#0091CE"/>
-      <stop offset="50%" stop-color="#00A99D"/>
-      <stop offset="100%" stop-color="#8BC53F"/>
-    </linearGradient>
+    <!-- Dégradé radial officiel : vert clair #adce80 → bleu marine #004d6b -->
+    <radialGradient id="chuGradient" cx="50%" cy="50%" r="50%"
+                    gradientUnits="objectBoundingBox"
+                    gradientTransform="translate(0.5,0.5) rotate(-42.284) scale(1,0.989) translate(-0.5,-0.5)">
+      <stop offset="0%"      stop-color="#adce80"/>
+      <stop offset="48.47%"  stop-color="#4eaf98"/>
+      <stop offset="59.53%"  stop-color="#3c9aac"/>
+      <stop offset="88.64%"  stop-color="#006471"/>
+      <stop offset="100%"    stop-color="#004d6b"/>
+    </radialGradient>
+    <clipPath id="clippath-1">
+      <path d="M34.1514,6.2165c-3.2362-.0293-7.0807.8623-11.416,3.1572C10.6675,15.6077,6.9268,23.6774,9.4362,31.9512c1.5796,5.2617,5.5835,8.8965,9.8857,11.9707c4.3027,3.0742,8.9722,5.4883,11.7041,9.5215c.3906.5703.7334,1.1699,1.0254,1.791c.1543.333.667.2227.6582-.1426c-.042-1.8018-.0781-4.9248.9717-8.0596c1.6865-5.082,5.8452-8.2578,8.7383-12.5957c4.1074-6.126,4.6875-14.2031,1.2891-20.6504c-1.874-3.5391-5.0674-6.9893-9.3574-7.543Z"/>
+    </clipPath>
   </defs>
-  <path d="M 50.00 90.00 L -22.38 74.61 A 80.00 80.00 0 0 1 -14.51 53.75 A 80.00 80.00 0 0 1 -0.78 36.17 A 80.00 80.00 0 0 1 17.56 23.49 A 80.00 80.00 0 0 1 38.85 16.84 A 80.00 80.00 0 0 1 61.15 16.84 A 80.00 80.00 0 0 1 82.44 23.49 A 80.00 80.00 0 0 1 100.78 36.17 A 80.00 80.00 0 0 1 114.51 53.75 A 80.00 80.00 0 0 1 122.38 74.61 Z" fill="url(#chuShell)"
-        stroke="#006FA3" stroke-width="1.2"
-        stroke-linejoin="round"/>
-    <line x1="50.00" y1="90.00" x2="-11.90" y2="55.22" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.55"/>
-    <line x1="50.00" y1="90.00" x2="1.28" y2="38.36" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.55"/>
-    <line x1="50.00" y1="90.00" x2="18.88" y2="26.19" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.55"/>
-    <line x1="50.00" y1="90.00" x2="39.30" y2="19.81" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.55"/>
-    <line x1="50.00" y1="90.00" x2="60.70" y2="19.81" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.55"/>
-    <line x1="50.00" y1="90.00" x2="81.12" y2="26.19" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.55"/>
-    <line x1="50.00" y1="90.00" x2="98.72" y2="38.36" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.55"/>
-    <line x1="50.00" y1="90.00" x2="111.90" y2="55.22" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.55"/>
-  <circle cx="50.00" cy="90.00" r="7" fill="#006FA3"/>
+
+  <!-- Fond dégradé clippé sur la silhouette de la coquille -->
+  <g clip-path="url(#clippath-1)">
+    <rect x="9.436" y="6.2165" width="42.9207" height="42.4898"
+          fill="url(#chuGradient)"/>
+  </g>
+
+  <!-- Contour de la coquille -->
+  <path d="M34.1514,6.2165c-3.2362-.0293-7.0807.8623-11.416,3.1572C10.6675,15.6077,6.9268,23.6774,9.4362,31.9512c1.5796,5.2617,5.5835,8.8965,9.8857,11.9707c4.3027,3.0742,8.9722,5.4883,11.7041,9.5215c.3906.5703.7334,1.1699,1.0254,1.791c.1543.333.667.2227.6582-.1426c-.042-1.8018-.0781-4.9248.9717-8.0596c1.6865-5.082,5.8452-8.2578,8.7383-12.5957c4.1074-6.126,4.6875-14.2031,1.2891-20.6504c-1.874-3.5391-5.0674-6.9893-9.3574-7.543Z"
+        fill="none" stroke="#004d6b" stroke-width="0.5"/>
+
+  <!-- Éléments graphiques à la base de la coquille -->
+  <path d="M22.0254,47.0762c-.0127.0049-.0264.0059-.04.0039c-.6689-.1104-2.3242-1.0254-3.5664-2.4131c-.9229-1.0264-.9619-2.293-.6182-2.9561c.2197-.4189.5264-.5166.7051-.543c.5156-.0742,1.0938.2197,1.5879.543c2.2637,1.4883,2.1455,5.2656,1.9316,5.3653Z"
+        fill="#004d6b"/>
+  <path d="M30.5596,51.5918c-.0049.0137-.0127.0254-.0234.0342c-.5312.4307-2.3945.877-4.0938.3174c-1.2285-.4082-1.8164-1.5-.8965-2.7441c.0283-.0391.0576-.0771.0879-.1143c.5791-.6953,1.627-.9805,2.5977-.8262c2.6914.4307,2.4961,3.1543,2.3281,3.333Z"
+        fill="#004d6b"/>
+
+  <!-- Texte CHU DE TOULOUSE -->
+  <text x="60" y="22" font-family="Arial, Helvetica, sans-serif"
+        font-size="16" font-weight="700" fill="#004d6b" letter-spacing="1">CHU</text>
+  <text x="60" y="35" font-family="Arial, Helvetica, sans-serif"
+        font-size="7.5" font-weight="400" fill="#004d6b" letter-spacing="2">DE</text>
+  <text x="60" y="47" font-family="Arial, Helvetica, sans-serif"
+        font-size="9" font-weight="400" fill="#004d6b" letter-spacing="0.5">TOULOUSE</text>
 </svg>

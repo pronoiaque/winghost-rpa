@@ -1,108 +1,112 @@
 """
-chu_logo.py — Logo « coquille » inspiré de l'identité visuelle du CHU de Toulouse
-(coquille Saint-Jacques, dégradé bleu → vert).
+chu_logo.py — Logo CHU de Toulouse.
 
-⚠️  Reconstruction libre destinée à l'habillage interne de l'outil. Ce n'est PAS
-    le fichier officiel déposé : pour un usage officiel, remplacez
-    assets/logo_chu.svg par le SVG fourni par la direction de la communication.
-
-Le module expose :
-  • COLORS                : la palette CHU (hex)
-  • build_svg()           : retourne le code SVG de la coquille (scalable)
+Expose :
+  • COLORS                : palette officielle (hex)
+  • build_svg()           : retourne le SVG officiel de la coquille
   • write_svg(path)       : écrit le SVG sur disque
-  • render_logo(size)     : retourne une image Pillow RGBA de la coquille
-                            (utilisée dans l'en-tête de la GUI, sans dépendance SVG)
+  • render_logo(size)     : retourne une image Pillow RGBA (en-tête GUI)
 
-Géométrie : un éventail de N segments ouvert vers le haut, bord supérieur
-festonné (petits arcs), nervures rayonnant depuis la charnière basse.
+Couleurs officielles extraites du SVG CHU de Toulouse :
+  dégradé radial #adce80 → #4eaf98 → #3c9aac → #006471 → #004d6b
+  texte / contours : #004d6b (bleu marine)
 """
 
 from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Optional
 
-# ─── Palette CHU Toulouse (reconstruction) ────────────────────────────────────
+# ─── Palette officielle CHU de Toulouse ──────────────────────────────────────
 
 COLORS = {
-    "blue":        "#0091CE",   # bleu institutionnel
-    "blue_dark":   "#006FA3",
-    "teal":        "#00A99D",   # transition du dégradé
-    "green":       "#8BC53F",   # vert (innovation / médical)
-    "green_dark":  "#6FA82E",
-    "slate":       "#1E2A38",   # texte ardoise
-    "grey":        "#5B6B7B",
-    "bg":          "#F4F7FA",
-    "white":       "#FFFFFF",
+    "green_light":  "#adce80",   # vert clair (0 % du dégradé)
+    "teal":         "#4eaf98",   # vert-bleu  (48.47 %)
+    "blue_teal":    "#3c9aac",   # bleu-vert  (59.53 %)
+    "blue_deep":    "#006471",   # bleu-vert foncé (88.64 %)
+    "navy":         "#004d6b",   # bleu marine (100 % + texte/contours)
+    # Aliases utilisés dans gui.py
+    "blue":         "#3c9aac",
+    "blue_dark":    "#004d6b",
+    "green":        "#adce80",
+    "green_dark":   "#006471",
+    "slate":        "#004d6b",
+    "grey":         "#5B6B7B",
+    "bg":           "#EAF3F6",
+    "white":        "#FFFFFF",
 }
 
-# ─── Paramètres géométriques de la coquille ──────────────────────────────────
+# ─── Silhouette officielle de la coquille (chemin SVG extrait du logo) ────────
 
-_CX, _CY      = 50.0, 90.0     # charnière (base de l'éventail), repère 0..100
-_R            = 74.0           # rayon extérieur
-_HALF_ANGLE   = 78.0           # demi-ouverture de l'éventail (degrés)
-_N_SEG        = 9              # nombre de segments (cannelures)
-_SCALLOP      = 6.0            # amplitude des festons du bord supérieur
+_SHELL_PATH = (
+    "M34.1514,6.2165"
+    "c-3.2362-.0293-7.0807.8623-11.416,3.1572"
+    "C10.6675,15.6077,6.9268,23.6774,9.4362,31.9512"
+    "c1.5796,5.2617,5.5835,8.8965,9.8857,11.9707"
+    "c4.3027,3.0742,8.9722,5.4883,11.7041,9.5215"
+    "c.3906.5703.7334,1.1699,1.0254,1.791"
+    "c.1543.333.667.2227.6582-.1426"
+    "c-.042-1.8018-.0781-4.9248.9717-8.0596"
+    "c1.6865-5.082,5.8452-8.2578,8.7383-12.5957"
+    "c4.1074-6.126,4.6875-14.2031,1.2891-20.6504"
+    "c-1.874-3.5391-5.0674-6.9893-9.3574-7.543Z"
+)
 
-
-def _rim_point(theta_deg: float, r: float = _R) -> tuple[float, float]:
-    """Point du bord, theta mesuré depuis la verticale (positif vers la droite)."""
-    t = math.radians(theta_deg)
-    return (_CX + r * math.sin(t), _CY - r * math.cos(t))
-
-
-def _segment_angles() -> list[float]:
-    a0, a1 = -_HALF_ANGLE, _HALF_ANGLE
-    return [a0 + (a1 - a0) * i / _N_SEG for i in range(_N_SEG + 1)]
+_VB_W, _VB_H = 113.3858, 56.6924   # viewBox officiel
 
 
 # ─── Génération SVG ───────────────────────────────────────────────────────────
 
 def build_svg() -> str:
-    angles = _segment_angles()
-    rim = [_rim_point(a) for a in angles]
-
-    # Contour : charnière → bord festonné → retour charnière
-    d = [f"M {_CX:.2f} {_CY:.2f}", f"L {rim[0][0]:.2f} {rim[0][1]:.2f}"]
-    for i in range(_N_SEG):
-        # arc bombé vers l'extérieur entre rim[i] et rim[i+1]
-        x2, y2 = rim[i + 1]
-        rr = _R + _SCALLOP
-        d.append(f"A {rr:.2f} {rr:.2f} 0 0 1 {x2:.2f} {y2:.2f}")
-    d.append("Z")
-    outline = " ".join(d)
-
-    # Nervures (de la charnière vers chaque point interne du bord)
-    ridges = []
-    for a in angles[1:-1]:
-        rx, ry = _rim_point(a, _R - 3)
-        ridges.append(
-            f'<line x1="{_CX:.2f}" y1="{_CY:.2f}" x2="{rx:.2f}" y2="{ry:.2f}" '
-            f'stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" '
-            f'stroke-opacity="0.55"/>'
-        )
-    ridges_svg = "\n    ".join(ridges)
-
-    # Oreilles/charnière : petit demi-disque à la base
-    hinge = (f'<circle cx="{_CX:.2f}" cy="{_CY:.2f}" r="7" '
-             f'fill="{COLORS["blue_dark"]}"/>')
-
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"
-     width="100" height="100" role="img" aria-label="CHU Toulouse">
+    navy = COLORS["navy"]
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     viewBox="0 0 {_VB_W} {_VB_H}" role="img" aria-label="CHU de Toulouse">
   <defs>
-    <linearGradient id="chuShell" x1="0" y1="0" x2="1" y2="0.25">
-      <stop offset="0%"  stop-color="{COLORS['blue']}"/>
-      <stop offset="50%" stop-color="{COLORS['teal']}"/>
-      <stop offset="100%" stop-color="{COLORS['green']}"/>
-    </linearGradient>
+    <radialGradient id="chuGradient" cx="50%" cy="50%" r="50%"
+                    gradientUnits="objectBoundingBox"
+                    gradientTransform="translate(0.5,0.5) rotate(-42.284) scale(1,0.989) translate(-0.5,-0.5)">
+      <stop offset="0%"      stop-color="{COLORS['green_light']}"/>
+      <stop offset="48.47%"  stop-color="{COLORS['teal']}"/>
+      <stop offset="59.53%"  stop-color="{COLORS['blue_teal']}"/>
+      <stop offset="88.64%"  stop-color="{COLORS['blue_deep']}"/>
+      <stop offset="100%"    stop-color="{COLORS['navy']}"/>
+    </radialGradient>
+    <clipPath id="clippath-1">
+      <path d="{_SHELL_PATH}"/>
+    </clipPath>
   </defs>
-  <path d="{outline}" fill="url(#chuShell)"
-        stroke="{COLORS['blue_dark']}" stroke-width="1.2"
-        stroke-linejoin="round"/>
-    {ridges_svg}
-  {hinge}
+
+  <g clip-path="url(#clippath-1)">
+    <rect x="9.436" y="6.2165" width="42.9207" height="42.4898"
+          fill="url(#chuGradient)"/>
+  </g>
+
+  <path d="{_SHELL_PATH}"
+        fill="none" stroke="{navy}" stroke-width="0.5"/>
+
+  <!-- Petits éléments graphiques à la base de la coquille -->
+  <path d="M22.0254,47.0762c-.0127.0049-.0264.0059-.04.0039
+           c-.6689-.1104-2.3242-1.0254-3.5664-2.4131
+           c-.9229-1.0264-.9619-2.293-.6182-2.9561
+           c.2197-.4189.5264-.5166.7051-.543
+           c.5156-.0742,1.0938.2197,1.5879.543
+           c2.2637,1.4883,2.1455,5.2656,1.9316,5.3653Z"
+        fill="{navy}"/>
+  <path d="M30.5596,51.5918c-.0049.0137-.0127.0254-.0234.0342
+           c-.5312.4307-2.3945.877-4.0938.3174
+           c-1.2285-.4082-1.8164-1.5-.8965-2.7441
+           c.0283-.0391.0576-.0771.0879-.1143
+           c.5791-.6953,1.627-.9805,2.5977-.8262
+           c2.6914.4307,2.4961,3.1543,2.3281,3.333Z"
+        fill="{navy}"/>
+
+  <text x="60" y="22" font-family="Arial, Helvetica, sans-serif"
+        font-size="16" font-weight="700" fill="{navy}" letter-spacing="1">CHU</text>
+  <text x="60" y="35" font-family="Arial, Helvetica, sans-serif"
+        font-size="7.5" font-weight="400" fill="{navy}" letter-spacing="2">DE</text>
+  <text x="60" y="47" font-family="Arial, Helvetica, sans-serif"
+        font-size="9" font-weight="400" fill="{navy}" letter-spacing="0.5">TOULOUSE</text>
 </svg>
 """
 
@@ -121,10 +125,66 @@ def _hex(h: str) -> tuple[int, int, int]:
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore
 
 
+def _lerp(a: tuple, b: tuple, t: float) -> tuple:
+    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+
+def _gradient_color(f: float) -> tuple[int, int, int]:
+    """Dégradé officiel : vert clair → teal → bleu-vert → bleu foncé → marine."""
+    stops = [
+        (0.0000, _hex(COLORS["green_light"])),
+        (0.4847, _hex(COLORS["teal"])),
+        (0.5953, _hex(COLORS["blue_teal"])),
+        (0.8864, _hex(COLORS["blue_deep"])),
+        (1.0000, _hex(COLORS["navy"])),
+    ]
+    for i in range(len(stops) - 1):
+        t0, c0 = stops[i]
+        t1, c1 = stops[i + 1]
+        if t0 <= f <= t1:
+            seg = (f - t0) / (t1 - t0) if t1 > t0 else 0.0
+            return _lerp(c0, c1, seg)
+    return stops[-1][1]
+
+
+def _shell_polygon(S: int) -> list[tuple[float, float]]:
+    """
+    Approximation polygonale de la silhouette officielle, mise à l'échelle.
+    La coquille occupe ~x:9..52, y:6..55 dans le viewBox 113x57.
+    Pour le rendu carré on extrait uniquement la zone coquille.
+    """
+    shell_vb_x0, shell_vb_y0 = 9.0, 6.0
+    shell_vb_w = 43.5
+    sc = S / shell_vb_w
+
+    def P(x: float, y: float) -> tuple[float, float]:
+        return ((x - shell_vb_x0) * sc, (y - shell_vb_y0) * sc)
+
+    return [
+        P(34.15, 6.22),
+        P(24.50, 7.50),
+        P(15.00, 12.00),
+        P(9.44,  20.00),
+        P(9.44,  32.00),
+        P(14.00, 40.00),
+        P(19.32, 43.92),
+        P(25.00, 48.50),
+        P(32.04, 55.00),
+        P(32.67, 54.86),
+        P(33.64, 46.80),
+        P(38.00, 38.50),
+        P(42.50, 29.00),
+        P(44.50, 20.00),
+        P(43.00, 12.00),
+        P(38.50, 7.50),
+        P(34.15, 6.22),
+    ]
+
+
 def render_logo(size: int = 160):
     """
-    Retourne une image Pillow RGBA (carrée, `size`×`size`) de la coquille,
-    dégradé horizontal bleu→teal→vert masqué par la silhouette + nervures.
+    Retourne une image Pillow RGBA (carrée, size×size) de la coquille CHU,
+    avec le dégradé officiel (vert clair → marine).
     Rendu en super-échantillonnage ×4 puis réduit pour des bords nets.
     """
     from PIL import Image, ImageDraw
@@ -133,38 +193,15 @@ def render_logo(size: int = 160):
     S = size * ss
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
 
-    sc = S / 100.0  # échelle repère 0..100 → pixels
+    poly = _shell_polygon(S)
 
-    def P(x, y):
-        return (x * sc, y * sc)
-
-    # Silhouette (polygone : charnière + bord festonné échantillonné finement)
-    angles = _segment_angles()
-    poly = [P(_CX, _CY)]
-    samples = 160
-    a0, a1 = angles[0], angles[-1]
-    for k in range(samples + 1):
-        a = a0 + (a1 - a0) * k / samples
-        # ondulation du bord (festons) : amplitude _SCALLOP modulée
-        phase = (a - a0) / (a1 - a0) * _N_SEG
-        bump = _SCALLOP * abs(math.sin(phase * math.pi))
-        x, y = _rim_point(a, _R + bump - _SCALLOP * 0.5)
-        poly.append(P(x, y))
-    poly.append(P(_CX, _CY))
-
-    # Dégradé horizontal bleu→teal→vert
+    # Dégradé diagonal vert→marine (approxime le radial officiel)
     grad = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     gpx = grad.load()
-    c_blue, c_teal, c_green = _hex(COLORS["blue"]), _hex(COLORS["teal"]), _hex(COLORS["green"])
     for x in range(S):
-        f = x / max(S - 1, 1)
-        if f < 0.5:
-            t = f / 0.5
-            col = tuple(int(c_blue[i] + (c_teal[i] - c_blue[i]) * t) for i in range(3))
-        else:
-            t = (f - 0.5) / 0.5
-            col = tuple(int(c_teal[i] + (c_green[i] - c_teal[i]) * t) for i in range(3))
         for y in range(S):
+            f = (x + y) / max(2 * S - 2, 1)
+            col = _gradient_color(f)
             gpx[x, y] = (col[0], col[1], col[2], 255)
 
     # Masque silhouette
@@ -172,19 +209,10 @@ def render_logo(size: int = 160):
     ImageDraw.Draw(mask).polygon(poly, fill=255)
     img.paste(grad, (0, 0), mask)
 
-    # Nervures blanches translucides
+    # Contour bleu marine
     draw = ImageDraw.Draw(img)
-    for a in angles[1:-1]:
-        rx, ry = _rim_point(a, _R - 3)
-        draw.line([P(_CX, _CY), P(rx, ry)],
-                  fill=(255, 255, 255, 140), width=max(int(1.6 * sc), 1))
-
-    # Contour
-    draw.line(poly, fill=(*_hex(COLORS["blue_dark"]), 230), width=max(int(1.2 * sc), 1))
-    # Charnière
-    r = 7 * sc
-    cx, cy = P(_CX, _CY)
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(*_hex(COLORS["blue_dark"]), 255))
+    navy_rgba = (*_hex(COLORS["navy"]), 230)
+    draw.line(poly, fill=navy_rgba, width=max(int(1.2 * S / 100), 1))
 
     return img.resize((size, size), Image.LANCZOS)
 

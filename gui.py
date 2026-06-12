@@ -91,27 +91,27 @@ except Exception:
 _LEGACY_SESSIONS_DIR = Path("sessions")
 SCENARIOS_DIR_LOCAL  = SCENARIOS_DIR  # Path("scenarios")
 
-# ─── Palette CHU Toulouse — thème clair institutionnel ───────────────────────
-# Couleurs inspirées de l'identité visuelle du CHU de Toulouse (bleu → vert).
+# ─── Palette CHU Toulouse — couleurs officielles ─────────────────────────────
+# Extraites du SVG officiel : dégradé #adce80→#4eaf98→#3c9aac→#006471→#004d6b
 
-_BG        = "#EDF2F8"   # canvas application (gris bleuté très clair)
+_BG        = "#EAF3F6"   # canvas application (bleu-vert très clair)
 _BG2       = "#FFFFFF"   # cartes / panneaux
-_BG3       = "#E3EAF2"   # sous-panneaux, en-têtes de table, survol léger
-_BG4       = "#DCE5EF"   # champs, boutons secondaires
-_ACCENT    = "#0091CE"   # bleu CHU
-_ACCENT2   = "#8BC53F"   # vert CHU (innovation / médical)
-_GREEN     = "#2E9E5B"   # succès
+_BG3       = "#D9EAEF"   # sous-panneaux, en-têtes de table, survol léger
+_BG4       = "#C8DCE5"   # champs, boutons secondaires
+_ACCENT    = "#3c9aac"   # bleu-vert CHU (milieu du dégradé officiel)
+_ACCENT2   = "#adce80"   # vert clair CHU (début du dégradé)
+_GREEN     = "#4eaf98"   # teal succès
 _RED       = "#D64550"   # erreur
 _YELLOW    = "#D99A1C"   # avertissement
-_FG        = "#1E2A38"   # texte ardoise
-_FG2       = "#5B6B7B"   # texte secondaire
+_FG        = "#004d6b"   # bleu marine officiel (texte principal)
+_FG2       = "#006471"   # bleu-vert foncé (texte secondaire)
 
-_HEADER     = "#0091CE"  # bandeau supérieur (bleu CHU)
+_HEADER     = "#004d6b"  # bandeau supérieur (bleu marine officiel)
 _HEADER_FG  = "#FFFFFF"  # texte sur le bandeau
 _ON_ACCENT  = "#FFFFFF"  # texte sur boutons colorés
-_SELECT     = "#D6ECF7"  # ligne sélectionnée (bleu très clair)
-_BLUE_DARK  = "#006FA3"  # survol bleu
-_GREEN_DARK = "#6FA82E"  # survol vert
+_SELECT     = "#C5E8EF"  # ligne sélectionnée (bleu-vert très clair)
+_BLUE_DARK  = "#003d56"  # survol bleu (marine plus foncé)
+_GREEN_DARK = "#006471"  # survol vert (bleu-vert foncé)
 
 _FONT_MONO = ("Consolas", 9)
 _FONT_UI   = ("Segoe UI", 11)

@@ -9,17 +9,20 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ### Ajouté
 
-#### 🎨 Habillage aux couleurs du CHU de Toulouse
-- **Thème clair institutionnel** : l'interface passe d'un thème sombre à un thème clair fond blanc / gris bleuté, aux couleurs du CHU de Toulouse
-- Palette : bleu CHU `#0091CE`, vert `#8BC53F`, transition teal `#00A99D`, texte ardoise `#1E2A38`, fonds `#FFFFFF` / `#EDF2F8`
-- Bandeau supérieur **bleu CHU** avec texte blanc ; boutons, onglets et accents recolorés en conséquence
+#### 🎨 Habillage aux couleurs officielles du CHU de Toulouse
+- **Thème clair institutionnel** : interface en thème clair aux couleurs officielles du CHU de Toulouse
+- Palette officielle extraite du SVG CHU : dégradé `#adce80` → `#4eaf98` → `#3c9aac` → `#006471` → `#004d6b`
+- Texte principal et bandeau : **bleu marine officiel `#004d6b`** ; fonds `#FFFFFF` / `#EAF3F6` (bleu-vert très clair)
+- Boutons, onglets et accents recolorés en bleu-vert `#3c9aac` et vert clair `#adce80`
 
 #### 🐚 Logo « coquille » CHU (`chu_logo.py` + `assets/logo_chu.svg`)
-- Nouveau module `chu_logo` : génère un logo **coquille Saint-Jacques** en dégradé bleu→vert (SVG scalable + rendu Pillow)
-- Logo affiché dans le **bandeau d'en-tête**, le **splash screen**, l'**icône de fenêtre** (barre des tâches) et l'**icône systray**
-- `assets/logo_chu.svg` (vectoriel) + `assets/logo_chu.png` (raster) livrés ; chargés en priorité s'ils existent
-
-> ⚠️ Le logo fourni est une **reconstruction libre** inspirée de l'identité visuelle du CHU de Toulouse (coquille, dégradé bleu→vert), destinée à l'habillage interne de l'outil. Pour un usage officiel, remplacez `assets/logo_chu.svg` / `assets/logo_chu.png` par le fichier fourni par la direction de la communication. Les codes couleurs exacts de la charte n'ayant pu être récupérés automatiquement, la palette est une approximation fidèle ajustable dans `chu_logo.COLORS` et l'en-tête de `gui.py`.
+- Nouveau module `chu_logo` : génère le logo **coquille CHU de Toulouse** avec le dégradé radial officiel (SVG scalable + rendu Pillow)
+- Silhouette officielle reproduite fidèlement depuis le SVG CHU (chemin `M34.1514,6.2165…`)
+- Dégradé radial avec rotation `-42.284°` : vert clair → teal → bleu-vert → bleu foncé → marine
+- Deux petits éléments graphiques à la base de la coquille (`#004d6b`) inclus
+- Texte `CHU / DE / TOULOUSE` en bleu marine officiel intégré dans le SVG
+- Logo affiché dans le **bandeau d'en-tête**, le **splash screen**, l'**icône de fenêtre** et l'**icône systray**
+- `assets/logo_chu.svg` (vectoriel) + `assets/logo_chu.png` (raster) livrés
 
 ---
 
