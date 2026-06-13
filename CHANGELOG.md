@@ -5,6 +5,25 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [6.3.0] — 2026-06-13
+
+### Modifié
+
+#### 🔓 La vérification visuelle OCR devient optionnelle (désactivée par défaut)
+- Auparavant : « les clics et saisies n'étaient rejoués que si le contexte visuel correspondait » (gate OCR **toujours actif**)
+- Désormais : ce comportement est une **option décochée par défaut** — case **« Vérifier le contexte visuel (OCR) »** dans *Options replay*
+- **Par défaut, toutes les actions sont rejouées sans vérification OCR** → rejeu plus rapide et plus robuste (plus de faux négatifs qui faisaient sauter des clics)
+- Le **seuil OCR** (slider) n'est désormais pertinent que lorsque la case est cochée ; il est **grisé** quand l'option est désactivée
+- Quand l'option est décochée, **EasyOCR n'est pas sollicité** pendant le replay (les colonnes *Score OCR* / *Visuel* affichent « — »)
+
+### Détails techniques
+- `ActionReplayer(..., visual_gate: bool = False)` : nouveau paramètre. Le bloc de vérification OCR de `_replay_action` n'est exécuté que si `visual_gate` est vrai
+- `MultiReplayRunner(..., visual_gate=False, reader=None)` et `SchedulerRunner(..., visual_gate=False, reader=None)` propagent l'option (replay multiple et mode automatique)
+- EasyOCR n'est initialisé (ou le lecteur partagé utilisé) que si `visual_gate=True`
+- IHM : `self._visual_gate_var` (BooleanVar, défaut `False`) transmis aux trois constructeurs ; `_on_visual_gate_toggle()` active/grise le slider de seuil
+
+---
+
 ## [6.2.0] — 2026-06-12
 
 ### Ajouté

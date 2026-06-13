@@ -1,6 +1,11 @@
 """
 gui.py — Interface CustomTkinter pour WinGhost RPA.
 
+v6.3 :
+  • Le gate visuel OCR devient une option DÉCOCHÉE par défaut
+    (« Vérifier le contexte visuel (OCR) ») ; par défaut, toutes les actions
+    sont rejouées sans vérification. Le seuil OCR n'est actif que si cochée.
+
 v6.2 :
   • Thème clair institutionnel aux couleurs du CHU de Toulouse (bleu → vert)
   • Logo « coquille » CHU dans le bandeau et le splash (chu_logo + assets/logo_chu.svg)
@@ -280,7 +285,7 @@ class _ScenarioRow(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("CHU Toulouse — WinGhost RPA v6.2")
+        self.title("CHU Toulouse — WinGhost RPA v6.3")
         self.configure(fg_color=_BG)
         self.minsize(1000, 700)
         self._center_window(1060, 740)
@@ -348,7 +353,7 @@ class App(ctk.CTk):
             ctk.CTkLabel(splash, image=logo_big, text="").pack(pady=(26, 2))
         ctk.CTkLabel(splash, text="CHU Toulouse — WinGhost RPA",
                      font=("Segoe UI Bold", 22), text_color=_ACCENT).pack(pady=(2, 2))
-        ctk.CTkLabel(splash, text="v6.2 — Robot Process Automation",
+        ctk.CTkLabel(splash, text="v6.3 — Robot Process Automation",
                      font=("Segoe UI", 12), text_color=_FG2).pack()
         ctk.CTkLabel(splash, text="© CHU Toulouse 2026",
                      font=("Segoe UI", 9), text_color=_FG2).pack(side="bottom", pady=10)
@@ -451,7 +456,7 @@ class App(ctk.CTk):
         if logo_img is not None:
             ctk.CTkLabel(header, image=logo_img, text="").pack(side="left", padx=(16, 8))
 
-        ctk.CTkLabel(header, text="CHU Toulouse  ·  WinGhost RPA v6.2",
+        ctk.CTkLabel(header, text="CHU Toulouse  ·  WinGhost RPA v6.3",
                      font=_FONT_H1, text_color=_HEADER_FG).pack(
             side="left", padx=(0, 20))
 
@@ -568,27 +573,53 @@ class App(ctk.CTk):
                      font=_FONT_SM, text_color=_FG2).pack(
             anchor="w", padx=12, pady=(10, 4))
 
-        # Seuil OCR
+        # Gate visuel OCR — option DÉCOCHÉE par défaut (v6.3)
+        gate_row = ctk.CTkFrame(opt, fg_color="transparent")
+        gate_row.pack(fill="x", padx=10, pady=(4, 2))
+        self._visual_gate_var = tk.BooleanVar(value=False)
+        self._visual_gate_chk = ctk.CTkCheckBox(
+            gate_row,
+            text="Vérifier le contexte visuel (OCR)",
+            variable=self._visual_gate_var,
+            onvalue=True, offvalue=False,
+            font=_FONT_SM, text_color=_FG,
+            fg_color=_ACCENT, hover_color=_BLUE_DARK,
+            checkmark_color=_ON_ACCENT,
+            command=self._on_visual_gate_toggle,
+        )
+        self._visual_gate_chk.pack(side="left")
+        CTkToolTip(self._visual_gate_chk,
+                   "Si coché : les clics et saisies ne sont rejoués que si le\n"
+                   "contexte visuel correspond (ancrage OCR + seuil ci-dessous).\n"
+                   "Décoché (par défaut) : toutes les actions sont rejouées\n"
+                   "sans vérification — rejeu plus rapide et plus robuste.")
+
+        # Seuil OCR — pertinent uniquement quand le gate visuel est coché
         ocr_row = ctk.CTkFrame(opt, fg_color="transparent")
         ocr_row.pack(fill="x", padx=10, pady=2)
-        ctk.CTkLabel(ocr_row, text="Seuil OCR", font=_FONT_SM,
-                     text_color=_FG2, width=90).pack(side="left")
+        self._ocr_threshold_lbl_l = ctk.CTkLabel(
+            ocr_row, text="Seuil OCR", font=_FONT_SM,
+            text_color=_FG2, width=90)
+        self._ocr_threshold_lbl_l.pack(side="left")
         self._ocr_threshold_var = tk.DoubleVar(value=0.25)
         ocr_lbl = ctk.CTkLabel(ocr_row, textvariable=tk.StringVar(),
                                 font=_FONT_SM, text_color=_FG, width=36)
         ocr_lbl.pack(side="right")
-        ocr_slider = ctk.CTkSlider(
+        self._ocr_slider = ctk.CTkSlider(
             ocr_row, variable=self._ocr_threshold_var,
             from_=0.0, to=1.0, number_of_steps=20,
             button_color=_ACCENT, button_hover_color=_ACCENT,
             progress_color=_ACCENT, fg_color=_BG3,
             command=lambda v: ocr_lbl.configure(text=f"{v:.2f}"),
         )
-        ocr_slider.pack(side="left", fill="x", expand=True, padx=6)
+        self._ocr_slider.pack(side="left", fill="x", expand=True, padx=6)
         ocr_lbl.configure(text=f"{self._ocr_threshold_var.get():.2f}")
-        CTkToolTip(ocr_slider,
+        CTkToolTip(self._ocr_slider,
                    "Score minimum de similarité OCR pour valider une action\n"
-                   "0.0 = jamais ignorer · 1.0 = correspondance parfaite requise")
+                   "0.0 = jamais ignorer · 1.0 = correspondance parfaite requise\n"
+                   "(actif uniquement si « Vérifier le contexte visuel » est coché)")
+        # État initial : gate décoché → slider grisé
+        self._on_visual_gate_toggle()
 
         # Répétitions
         rep_row = ctk.CTkFrame(opt, fg_color="transparent")
@@ -628,7 +659,7 @@ class App(ctk.CTk):
         self._replay_btn.pack(fill="x", pady=(0, 6))
         CTkToolTip(self._replay_btn,
                    "Lancer le replay du scénario sélectionné\n"
-                   "Vérifie visuellement chaque action via OCR avant de l'exécuter")
+                   "Vérification visuelle OCR optionnelle (case « Vérifier le contexte visuel »)")
 
         self._stop_btn = ctk.CTkButton(
             parent, text="  ■  STOP",
@@ -1148,6 +1179,17 @@ class App(ctk.CTk):
 
     # ── Replay ────────────────────────────────────────────────────────────────
 
+    def _on_visual_gate_toggle(self):
+        """Active/grise le seuil OCR selon l'état de la case « contexte visuel »."""
+        enabled = bool(self._visual_gate_var.get())
+        state = "normal" if enabled else "disabled"
+        color = _FG2 if enabled else _BG4
+        try:
+            self._ocr_slider.configure(state=state)
+            self._ocr_threshold_lbl_l.configure(text_color=color)
+        except Exception:
+            pass
+
     def _start_replay(self):
         if not self._session_path or not self._session_path.exists():
             messagebox.showwarning("Scénario introuvable",
@@ -1177,11 +1219,14 @@ class App(ctk.CTk):
         if n_runs > 1:
             self._log_debug(f"  Intervalle : {interval}s", "info")
 
+        visual_gate = bool(self._visual_gate_var.get())
+
         if n_runs == 1:
             self._replayer = ActionReplayer(
                 ocr_similarity_min=self._ocr_threshold_var.get(),
                 on_progress=self._on_action_progress,
                 reader=self._ocr_reader,
+                visual_gate=visual_gate,
             )
             session = self._replayer.load_session(self._session_path)
             self._total_actions = len(session.get("actions", []))
@@ -1193,6 +1238,8 @@ class App(ctk.CTk):
                 on_run_start=self._on_multi_run_start,
                 on_run_done=self._on_multi_run_done,
                 on_progress=self._on_action_progress,
+                visual_gate=visual_gate,
+                reader=self._ocr_reader,
             )
             with open(self._session_path, encoding="utf-8") as f:
                 _s = json.load(f)
@@ -1641,6 +1688,8 @@ class App(ctk.CTk):
             on_cycle_done=self._on_auto_cycle_done,
             on_progress=self._on_action_progress,
             on_wait=self._on_auto_wait,
+            visual_gate=bool(self._visual_gate_var.get()),
+            reader=self._ocr_reader,
         )
         self._auto_running = True
         self._auto_btn.configure(text="  ■  Arrêter l'automatique",

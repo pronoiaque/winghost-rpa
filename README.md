@@ -1,11 +1,20 @@
-# WinGhost RPA v6.2 — CHU Toulouse
+# WinGhost RPA v6.3 — CHU Toulouse
 
-> Enregistreur / Rejoueur RPA Windows **aux couleurs du CHU de Toulouse**, avec ancrage visuel OCR, capture de tous les inputs souris (clics, molette, glisser), enregistrement des mouvements, splash screen de démarrage, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
+> Enregistreur / Rejoueur RPA Windows **aux couleurs du CHU de Toulouse**, avec ancrage visuel OCR **optionnel**, capture de tous les inputs souris (clics, molette, glisser), enregistrement des mouvements, splash screen de démarrage, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
 
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-6.2.0-green)
+![Version](https://img.shields.io/badge/version-6.3.0-green)
+
+---
+
+## Nouveautés v6.3
+
+| Fonctionnalité | Description |
+|---|---|
+| 🔓 **Vérification visuelle OCR optionnelle** | Le rejeu conditionné à l'OCR (« ne rejouer que si le contexte visuel correspond ») devient une **option décochée par défaut** : case **« Vérifier le contexte visuel (OCR) »** dans *Options replay* |
+| ⚡ **Rejeu direct par défaut** | Sans la case cochée, **toutes les actions sont rejouées sans contrôle OCR** → plus rapide, plus robuste, plus de clics « sautés ». EasyOCR n'est pas sollicité ; le seuil OCR est grisé tant que l'option est décochée |
 
 ---
 
@@ -83,11 +92,12 @@ L'outil écoute **tous les inputs** souris et clavier via **pynput** : clics gau
 
 Pour chaque action enregistrée :
 
-1. **Vérification OCR** : compare le contexte visuel actuel à celui enregistré (score `difflib`)
-2. Si score < seuil → action ignorée (l'interface a changé) — un clic/saisie n'est rejoué **que si** le contexte visuel correspond
-3. **Exécution** via PyAutoGUI (les `move` sont rejoués directement via `moveTo`, sans vérification ni mesure de réponse)
-4. **Screenshot post-action** : PNG base64 de la région (160 px) autour du clic — toujours capturé
-5. **Mesure du temps de réponse** : polling pixel-à-pixel jusqu'au prochain changement d'écran
+1. **Vérification OCR — optionnelle (v6.3, décochée par défaut)** : si la case **« Vérifier le contexte visuel (OCR) »** est cochée, le contexte visuel actuel est comparé à celui enregistré (score `difflib`) et l'action est ignorée si le score est sous le seuil. **Par défaut (case décochée), cette étape est ignorée** et toutes les actions sont rejouées
+2. **Exécution** via PyAutoGUI (les `move` sont rejoués directement via `moveTo`, sans vérification ni mesure de réponse)
+3. **Screenshot post-action** : PNG base64 de la région (160 px) autour du clic — toujours capturé
+4. **Mesure du temps de réponse** : polling pixel-à-pixel jusqu'au prochain changement d'écran
+
+> 💡 **Quand activer le gate OCR ?** Cochez la case si l'interface cible peut bouger entre l'enregistrement et le rejeu (fenêtres déplacées, contenu dynamique) et que vous voulez éviter de cliquer « à l'aveugle ». Laissez-la décochée pour un rejeu rapide et déterministe sur une interface stable (cas le plus courant).
 
 ### 3. Multi-run (`MultiReplayRunner`)
 
@@ -162,9 +172,10 @@ python gui.py
 2. Cliquez **RECORD** → effectuez votre scénario → **STOP RECORD**
 3. La session apparaît dans la liste des scénarios
 4. Réglez le **nombre de répétitions** (1–99) et l'**intervalle** entre les runs (secondes)
-5. Cliquez **REPLAY** → WinGhost exécute, mesure, persiste tout en DB et log officiel
-6. Consultez l'onglet **Journal** (officiel en 1er, debug en sous-onglet) ou **Stats long-terme**
-7. Renommez ou supprimez un scénario via les boutons ✎ / 🗑 dans la liste
+5. *(Optionnel)* Cochez **« Vérifier le contexte visuel (OCR) »** pour n'exécuter chaque clic/saisie que si l'écran correspond à l'enregistrement (réglez alors le **seuil OCR**). **Décoché par défaut** → rejeu direct sans vérification
+6. Cliquez **REPLAY** → WinGhost exécute, mesure, persiste tout en DB et log officiel
+7. Consultez l'onglet **Journal** (officiel en 1er, debug en sous-onglet) ou **Stats long-terme**
+8. Renommez ou supprimez un scénario via les boutons ✎ / 🗑 dans la liste
 
 ### Mode automatique (surveillance planifiée)
 
@@ -186,14 +197,20 @@ python gui.py
 # Enregistrer (avec nom et application cible)
 python recorder.py --name="Connexion O" --app="Outlook"
 
-# Rejouer la dernière session (1 fois)
+# Rejouer la dernière session (1 fois) — sans vérification OCR (défaut v6.3)
 python replayer.py
 
 # Rejouer une session précise 5 fois avec 30 s d'intervalle
 python replayer.py scenarios/scenario_20260612_143200.json --runs=5 --interval=30
 
+# Activer la vérification visuelle OCR (gate strict) — optionnel
+python replayer.py scenarios/scenario_20260612_143200.json --visual-gate
+
 # Mode automatique : rejouer en boucle toutes les 30 min (Ctrl+C pour arrêter)
 python scheduler.py scenarios/scenario_20260612_143200.json --interval-min=30
+
+# Mode automatique AVEC vérification OCR
+python scheduler.py scenarios/scenario_20260612_143200.json --interval-min=30 --visual-gate
 
 # Dashboard web seul (sans GUI)
 python report_server.py [--port=8080]

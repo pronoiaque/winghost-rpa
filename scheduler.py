@@ -17,6 +17,7 @@ API :
         on_progress=callable(current:int, total:int, result),
         on_wait=callable(cycle:int, next_run_epoch:float),
         stop_event=threading.Event | None,
+        visual_gate=False,   # v6.3 : gate visuel OCR optionnel (off par défaut)
     )
 
     .run_forever(session_path, interval_minutes=30.0, max_cycles=0)
@@ -63,8 +64,13 @@ class SchedulerRunner:
         on_progress:    Optional[Callable[[int, int, object], None]] = None,
         on_wait:        Optional[Callable[[int, float], None]] = None,
         stop_event:     Optional[threading.Event] = None,
+        visual_gate:    bool = False,
+        reader=None,
     ):
         self.ocr_similarity_min = ocr_similarity_min
+        # v6.3 : gate visuel OCR optionnel, désactivé par défaut.
+        self.visual_gate        = visual_gate
+        self.reader             = reader
         self.on_cycle_start     = on_cycle_start
         self.on_cycle_done      = on_cycle_done
         self.on_progress        = on_progress
@@ -100,6 +106,8 @@ class SchedulerRunner:
         replayer = ActionReplayer(
             ocr_similarity_min=self.ocr_similarity_min,
             on_progress=self.on_progress,
+            visual_gate=self.visual_gate,
+            reader=self.reader,
         )
 
         while not self._stop_event.is_set():
@@ -152,6 +160,7 @@ def main():
     session_path = None
     interval_min = 30.0
     max_cycles   = 0
+    visual_gate  = False   # v6.3 : gate OCR désactivé par défaut
     args = sys.argv[1:]
 
     if args and not args[0].startswith("--"):
@@ -161,6 +170,8 @@ def main():
             interval_min = float(a.split("=", 1)[1])
         elif a.startswith("--max-cycles="):
             max_cycles = int(a.split("=", 1)[1])
+        elif a in ("--visual-gate", "--ocr"):
+            visual_gate = True
 
     if session_path is None:
         from replayer import SCENARIOS_DIR, SESSIONS_DIR
@@ -174,8 +185,10 @@ def main():
 
     print(f"Mode automatique : {session_path.name} toutes les {interval_min} min "
           f"(Ctrl+C pour arrêter)")
+    print(f"Gate visuel OCR : {'activé' if visual_gate else 'désactivé (défaut)'}")
     runner = SchedulerRunner(
         on_cycle_done=lambda c, r, s, rid: print(f"  Cycle #{c} → {s} (run_id={rid})"),
+        visual_gate=visual_gate,
     )
     try:
         runner.run_forever(session_path, interval_minutes=interval_min, max_cycles=max_cycles)

@@ -1,5 +1,9 @@
 """
-replayer.py — Replay de session avec vérification OCR et mesure de timing.
+replayer.py — Replay de session avec vérification OCR optionnelle et mesure de timing.
+
+v6.3 : le gate visuel OCR (« ne rejouer que si le contexte visuel correspond »)
+       devient OPTIONNEL et DÉSACTIVÉ par défaut (`visual_gate=False`).
+       Par défaut, toutes les actions sont rejouées sans contrôle OCR.
 
 v6.1 : rejeu de TOUS les inputs souris — clic milieu (middle_click), molette
        (scroll), glisser-déposer (drag) ; seuil OCR par défaut abaissé à 0.25
@@ -146,16 +150,25 @@ class ActionReplayer:
         ocr_similarity_min: float = OCR_SIMILARITY_MIN,
         on_progress: Optional[Callable[[int, int, "ActionResult"], None]] = None,
         reader=None,
+        visual_gate: bool = False,
     ):
         self.ocr_similarity_min  = ocr_similarity_min
+        # v6.3 : gate OCR optionnel, désactivé par défaut. Lorsqu'il est faux,
+        # aucune vérification visuelle n'est faite et toutes les actions sont rejouées.
+        self.visual_gate         = visual_gate
         self.on_progress         = on_progress
         self._results: list[ActionResult] = []
         self._stop_event = threading.Event()
         self._last_session: dict = {}
+        self._reader = reader
 
-        if reader is not None:
+        # L'OCR n'est nécessaire que si le gate visuel est actif. On n'initialise
+        # EasyOCR (coûteux) que dans ce cas et seulement si aucun lecteur partagé
+        # n'a été fourni.
+        if not visual_gate:
+            log.info("Gate visuel OCR désactivé — rejeu sans vérification.")
+        elif reader is not None:
             log.info("Utilisation du lecteur OCR partagé.")
-            self._reader = reader
         else:
             log.info("Initialisation EasyOCR…")
             self._reader = easyocr.Reader(OCR_LANGUAGES, gpu=False, verbose=False)
@@ -583,8 +596,9 @@ td.status{{font-weight:700}}
             result.t_action_sent = time.time()
             return result
 
-        # Vérification visuelle OCR
-        if visual_ctx and visual_ctx.get("ocr_text"):
+        # Vérification visuelle OCR — uniquement si le gate visuel est activé (v6.3).
+        # Par défaut (gate désactivé), aucune vérification : l'action est toujours rejouée.
+        if self.visual_gate and visual_ctx and visual_ctx.get("ocr_text"):
             ok, score = self._verify_visual(
                 raw.get("x"), raw.get("y"),
                 visual_ctx["screenshot_region"],
@@ -753,8 +767,12 @@ class MultiReplayRunner:
         on_run_done:  Optional[Callable[[int, int, list[ActionResult]], None]] = None,
         on_progress:  Optional[Callable[[int, int, ActionResult], None]] = None,
         stop_event:   Optional[threading.Event] = None,
+        visual_gate:  bool = False,
+        reader=None,
     ):
         self.ocr_similarity_min  = ocr_similarity_min
+        self.visual_gate         = visual_gate
+        self.reader              = reader
         self.on_run_start        = on_run_start
         self.on_run_done         = on_run_done
         self.on_progress         = on_progress
@@ -788,6 +806,8 @@ class MultiReplayRunner:
             replayer = ActionReplayer(
                 ocr_similarity_min=self.ocr_similarity_min,
                 on_progress=self.on_progress,
+                visual_gate=self.visual_gate,
+                reader=self.reader,
             )
             replayer._stop_event = self._stop_event
 
@@ -825,6 +845,7 @@ def main():
     session_path = None
     n_runs   = 1
     interval = 5.0
+    visual_gate = False   # v6.3 : gate OCR désactivé par défaut
     args     = sys.argv[1:]
 
     if args and not args[0].startswith("--"):
@@ -834,6 +855,8 @@ def main():
             n_runs = int(a.split("=", 1)[1])
         elif a.startswith("--interval="):
             interval = float(a.split("=", 1)[1])
+        elif a in ("--visual-gate", "--ocr"):
+            visual_gate = True
 
     if session_path is None:
         # Cherche d'abord dans scenarios/, puis sessions/
@@ -846,8 +869,10 @@ def main():
         session_path = candidates[-1]
         print(f"Dernière session : {session_path}")
 
+    print(f"Gate visuel OCR : {'activé' if visual_gate else 'désactivé (défaut)'}")
+
     if n_runs == 1:
-        rep      = ActionReplayer()
+        rep      = ActionReplayer(visual_gate=visual_gate)
         session  = rep.load_session(session_path)
         rep.replay(session)
         json_p   = rep.save_report(session_path)
@@ -855,7 +880,7 @@ def main():
         print(f"Rapport → {json_p}")
     else:
         print(f"Multi-run : {n_runs} × {session_path.name} — intervalle {interval}s")
-        runner = MultiReplayRunner()
+        runner = MultiReplayRunner(visual_gate=visual_gate)
         runner.run_n_times(session_path, n=n_runs, interval_s=interval)
         print(f"Runs terminés. Run IDs : {runner.run_ids}")
 
