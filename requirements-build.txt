@@ -28,5 +28,8 @@ psutil>=5.9.0
 # Icône de zone de notification (mode automatique)
 pystray>=0.19.4
 
+# Backend clavier de secours (hook bas niveau WH_KEYBOARD_LL)
+keyboard>=0.13.5
+
 # Outil d'empaquetage
 pyinstaller>=6.3.0

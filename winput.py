@@ -49,6 +49,15 @@ try:
 except Exception:                                   # pragma: no cover
     pyautogui = None
 
+# boppreh/keyboard (hook bas niveau WH_KEYBOARD_LL) — backend OPTIONNEL de
+# secours demandé pour le rejeu. Indépendant de pyautogui/pynput.
+try:
+    import keyboard as _kbd_lib
+    _HAS_KEYBOARD_LIB = True
+except Exception:                                   # pragma: no cover
+    _kbd_lib = None
+    _HAS_KEYBOARD_LIB = False
+
 
 # ─── Injection bas niveau Win32 SendInput (KEYEVENTF_UNICODE) ─────────────────
 # C'est la méthode de référence et la SEULE indépendante de la disposition
@@ -193,6 +202,85 @@ def now() -> float:
     return time.perf_counter()
 
 
+# ─── Focus / fenêtre au premier plan (diagnostic + correctif rejeu) ───────────
+
+def foreground_info() -> dict:
+    """
+    Décrit la fenêtre au premier plan et le contrôle qui a le focus clavier.
+    Sert au traçage du rejeu : si la frappe « ne marche pas », c'est souvent
+    qu'elle part vers cette fenêtre-ci au lieu de l'application cible.
+    """
+    info = {"hwnd": None, "title": "", "proc": "", "focus_class": ""}
+    if not sys.platform.startswith("win"):
+        return info
+    try:
+        import win32gui
+        import win32process
+        import ctypes
+        from ctypes import wintypes
+
+        hwnd = win32gui.GetForegroundWindow()
+        info["hwnd"] = hwnd
+        info["title"] = win32gui.GetWindowText(hwnd)
+        try:
+            import psutil
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            info["proc"] = psutil.Process(pid).name()
+        except Exception:
+            pass
+        # Contrôle ayant le focus clavier (via GUITHREADINFO)
+        try:
+            class GUITHREADINFO(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.DWORD),
+                            ("flags", wintypes.DWORD),
+                            ("hwndActive", wintypes.HWND),
+                            ("hwndFocus", wintypes.HWND),
+                            ("hwndCapture", wintypes.HWND),
+                            ("hwndMenuOwner", wintypes.HWND),
+                            ("hwndMoveSize", wintypes.HWND),
+                            ("hwndCaret", wintypes.HWND),
+                            ("rcCaret", wintypes.RECT)]
+            gti = GUITHREADINFO()
+            gti.cbSize = ctypes.sizeof(GUITHREADINFO)
+            if ctypes.windll.user32.GetGUIThreadInfo(0, ctypes.byref(gti)) and gti.hwndFocus:
+                info["focus_class"] = win32gui.GetClassName(gti.hwndFocus)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return info
+
+
+def focus_at(x: int, y: int) -> bool:
+    """
+    Force la fenêtre située sous (x, y) à passer au premier plan avant la frappe.
+    Corrige le cas où le clic de rejeu n'a pas transféré le focus clavier vers
+    l'application cible (les frappes seraient sinon avalées par WinGhost ou
+    perdues). Renvoie True si une fenêtre a été activée.
+    """
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        import win32gui
+        pt_hwnd = win32gui.WindowFromPoint((x, y))
+        if not pt_hwnd:
+            return False
+        # Remonter à la fenêtre racine (top-level)
+        root = win32gui.GetAncestor(pt_hwnd, 2)  # GA_ROOT = 2
+        target = root or pt_hwnd
+        try:
+            win32gui.SetForegroundWindow(target)
+        except Exception:
+            # SetForegroundWindow peut être refusé ; on tente BringWindowToTop
+            try:
+                win32gui.BringWindowToTop(target)
+            except Exception:
+                pass
+        return True
+    except Exception:
+        return False
+
+
 # ─── 3. Saisie clavier fiable (Unicode) ───────────────────────────────────────
 
 def type_text(text: str, interval: float = 0.012) -> tuple[int, int]:
@@ -230,7 +318,15 @@ def type_text(text: str, interval: float = 0.012) -> tuple[int, int]:
             except Exception:
                 ok = False
 
-        # 3) pyautogui (ASCII/QWERTY — peut brouiller un clavier français)
+        # 3) boppreh/keyboard (hook bas niveau) — repli indépendant
+        if not ok and _HAS_KEYBOARD_LIB:
+            try:
+                _kbd_lib.write(ch)
+                ok = True
+            except Exception:
+                ok = False
+
+        # 4) pyautogui (ASCII/QWERTY — peut brouiller un clavier français)
         if not ok and pyautogui is not None:
             try:
                 pyautogui.write(ch)
@@ -256,6 +352,8 @@ def active_typing_backend() -> str:
         return "SendInput/Unicode (Win32, indépendant disposition)"
     if _HAS_PYNPUT:
         return "pynput.Controller (Unicode)"
+    if _HAS_KEYBOARD_LIB:
+        return "keyboard (boppreh, hook bas niveau)"
     if pyautogui is not None:
         return "pyautogui.write (ASCII/QWERTY — repli)"
     return "AUCUN — aucune injection clavier disponible"

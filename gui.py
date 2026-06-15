@@ -290,8 +290,8 @@ class App(ctk.CTk):
         super().__init__()
         self.title(f"CHU Toulouse — WinGhost RPA v{APP_VERSION}")
         self.configure(fg_color=_BG)
-        self.minsize(1000, 700)
-        self._center_window(1060, 740)
+        self.minsize(800, 600)
+        self._center_window(800, 600)
         self._set_window_icon()
 
         self._ocr_reader = None
@@ -475,7 +475,7 @@ class App(ctk.CTk):
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=16, pady=12)
 
-        left = ctk.CTkFrame(body, fg_color="transparent", width=290)
+        left = ctk.CTkFrame(body, fg_color="transparent", width=262)
         left.pack(side="left", fill="y", padx=(0, 12))
         left.pack_propagate(False)
 
@@ -488,13 +488,69 @@ class App(ctk.CTk):
     # ── Panneau gauche ────────────────────────────────────────────────────────
 
     def _build_left(self, parent):
-        # RECORD
-        rec = ctk.CTkFrame(parent, fg_color=_BG2, corner_radius=10)
-        rec.pack(fill="x", pady=(0, 10))
+        # ── Barre « magnéto » : les 3 fonctions principales en gros boutons ────
+        transport = ctk.CTkFrame(parent, fg_color=_BG2, corner_radius=10)
+        transport.pack(fill="x", pady=(0, 8))
+        transport.grid_columnconfigure((0, 1), weight=1, uniform="mag")
+
+        self._rec_btn = ctk.CTkButton(
+            transport, text="🔴\nREC",
+            font=("Segoe UI Semibold", 15),
+            fg_color=_GREEN, hover_color="#35A07E", text_color=_ON_ACCENT,
+            height=58, corner_radius=10,
+            command=self._toggle_record,
+        )
+        self._rec_btn.grid(row=0, column=0, sticky="ew", padx=(8, 4), pady=(8, 4))
+        CTkToolTip(self._rec_btn,
+                   "Démarrer / arrêter l'enregistrement des actions souris/clavier")
+
+        self._replay_btn = ctk.CTkButton(
+            transport, text="▶️\nREPLAY",
+            font=("Segoe UI Semibold", 15),
+            fg_color=_ACCENT, hover_color=_BLUE_DARK, text_color=_ON_ACCENT,
+            height=58, corner_radius=10, state="disabled",
+            command=self._start_replay,
+        )
+        self._replay_btn.grid(row=0, column=1, sticky="ew", padx=(4, 8), pady=(8, 4))
+        CTkToolTip(self._replay_btn,
+                   "Lancer le replay du scénario sélectionné")
+
+        self._stop_btn = ctk.CTkButton(
+            transport, text="⏹️\nSTOP",
+            font=("Segoe UI Semibold", 15),
+            fg_color=_RED, hover_color="#B04050", text_color=_ON_ACCENT,
+            height=58, corner_radius=10, state="disabled",
+            command=self._stop_replay,
+        )
+        self._stop_btn.grid(row=1, column=0, sticky="ew", padx=(8, 4), pady=(0, 8))
+        CTkToolTip(self._stop_btn,
+                   "Arrêter le replay en cours après l'action courante")
+
+        self._report_btn = ctk.CTkButton(
+            transport, text="📝\nRAPPORT",
+            font=("Segoe UI Semibold", 15),
+            fg_color=_BG3, hover_color=_BG4, text_color=_ACCENT,
+            height=58, corner_radius=10,
+            command=self._export_report_html,
+        )
+        self._report_btn.grid(row=1, column=1, sticky="ew", padx=(4, 8), pady=(0, 8))
+        CTkToolTip(self._report_btn,
+                   "Générer / ouvrir le rapport HTML du dernier replay")
+
+        # ── Réglages (zone défilante pour tenir dans 800×600) ─────────────────
+        scroll = ctk.CTkScrollableFrame(
+            parent, fg_color="transparent",
+            scrollbar_button_color=_BG4, scrollbar_button_hover_color=_ACCENT,
+        )
+        scroll.pack(fill="both", expand=True)
+
+        # RECORD (réglages)
+        rec = ctk.CTkFrame(scroll, fg_color=_BG2, corner_radius=10)
+        rec.pack(fill="x", pady=(0, 8))
 
         ctk.CTkLabel(rec, text="⬤  Enregistrement",
                      font=_FONT_SM, text_color=_FG2).pack(
-            anchor="w", padx=12, pady=(10, 4))
+            anchor="w", padx=12, pady=(8, 4))
 
         # Nom du scénario
         name_row = ctk.CTkFrame(rec, fg_color="transparent")
@@ -512,7 +568,7 @@ class App(ctk.CTk):
 
         # Application cible
         app_row = ctk.CTkFrame(rec, fg_color="transparent")
-        app_row.pack(fill="x", padx=10, pady=(0, 6))
+        app_row.pack(fill="x", padx=10, pady=(0, 8))
         ctk.CTkLabel(app_row, text="App :", font=_FONT_SM,
                      text_color=_FG2, width=44).pack(side="left")
         self._target_app_entry = ctk.CTkEntry(
@@ -526,25 +582,13 @@ class App(ctk.CTk):
                    "Inscrit tel quel dans le journal officiel\n"
                    "(laisser vide = détection auto du processus actif)")
 
-        self._rec_btn = ctk.CTkButton(
-            rec, text="  ⬤  RECORD",
-            font=("Segoe UI Semibold", 12),
-            fg_color=_GREEN, hover_color="#35A07E", text_color=_ON_ACCENT,
-            height=36, corner_radius=8,
-            command=self._toggle_record,
-        )
-        self._rec_btn.pack(fill="x", padx=10, pady=(0, 10))
-        CTkToolTip(self._rec_btn,
-                   "Démarrer l'enregistrement des actions souris/clavier\n"
-                   "Cliquer à nouveau pour arrêter et sauvegarder")
-
         # SCÉNARIOS
-        scen_frame = ctk.CTkFrame(parent, fg_color=_BG2, corner_radius=10)
-        scen_frame.pack(fill="both", expand=True, pady=(0, 10))
+        scen_frame = ctk.CTkFrame(scroll, fg_color=_BG2, corner_radius=10)
+        scen_frame.pack(fill="x", pady=(0, 8))
 
         hdr = ctk.CTkFrame(scen_frame, fg_color="transparent")
-        hdr.pack(fill="x", padx=10, pady=(10, 4))
-        ctk.CTkLabel(hdr, text="▶  Scénarios",
+        hdr.pack(fill="x", padx=10, pady=(8, 4))
+        ctk.CTkLabel(hdr, text="📂  Scénarios",
                      font=_FONT_SM, text_color=_FG2).pack(side="left")
         rf = ctk.CTkButton(hdr, text="↺", width=26, height=24,
                            fg_color="transparent", hover_color=_BG4,
@@ -554,11 +598,11 @@ class App(ctk.CTk):
         CTkToolTip(rf, "Rafraîchir la liste des scénarios")
 
         self._scen_scroll = ctk.CTkScrollableFrame(
-            scen_frame, fg_color=_BG3, corner_radius=6,
+            scen_frame, fg_color=_BG3, corner_radius=6, height=150,
             scrollbar_button_color=_BG4,
             scrollbar_button_hover_color=_ACCENT,
         )
-        self._scen_scroll.pack(fill="both", expand=True, padx=8, pady=(0, 6))
+        self._scen_scroll.pack(fill="x", padx=8, pady=(0, 6))
 
         browse_btn = ctk.CTkButton(
             scen_frame, text="Parcourir…", height=26,
@@ -570,8 +614,8 @@ class App(ctk.CTk):
         CTkToolTip(browse_btn, "Ouvrir un fichier scénario JSON depuis un autre dossier")
 
         # OPTIONS
-        opt = ctk.CTkFrame(parent, fg_color=_BG2, corner_radius=10)
-        opt.pack(fill="x", pady=(0, 10))
+        opt = ctk.CTkFrame(scroll, fg_color=_BG2, corner_radius=10)
+        opt.pack(fill="x", pady=(0, 8))
         ctk.CTkLabel(opt, text="⚙  Options replay",
                      font=_FONT_SM, text_color=_FG2).pack(
             anchor="w", padx=12, pady=(10, 4))
@@ -650,48 +694,22 @@ class App(ctk.CTk):
                    "Pause en secondes entre deux runs consécutifs\n"
                    "Utile pour laisser l'application se réinitialiser")
 
-        # BOUTONS D'ACTION
-        self._replay_btn = ctk.CTkButton(
-            parent, text="  ▶  REPLAY",
-            font=("Segoe UI Semibold", 12),
-            fg_color=_ACCENT, hover_color=_BLUE_DARK, text_color=_ON_ACCENT,
-            height=38, corner_radius=8,
-            state="disabled",
-            command=self._start_replay,
-        )
-        self._replay_btn.pack(fill="x", pady=(0, 6))
-        CTkToolTip(self._replay_btn,
-                   "Lancer le replay du scénario sélectionné\n"
-                   "Vérification visuelle OCR optionnelle (case « Vérifier le contexte visuel »)")
-
-        self._stop_btn = ctk.CTkButton(
-            parent, text="  ■  STOP",
-            font=("Segoe UI Semibold", 12),
-            fg_color=_RED, hover_color="#B04050", text_color=_ON_ACCENT,
-            height=38, corner_radius=8,
-            state="disabled",
-            command=self._stop_replay,
-        )
-        self._stop_btn.pack(fill="x", pady=(0, 6))
-        CTkToolTip(self._stop_btn,
-                   "Arrêter le replay en cours après l'action courante\n"
-                   "Les résultats déjà collectés seront sauvegardés")
-
+        # Dashboard (les actions REC/REPLAY/STOP/RAPPORT sont dans la barre magnéto)
         self._dashboard_btn = ctk.CTkButton(
-            parent, text="  🌐  Dashboard Web",
+            scroll, text="  🌐  Dashboard Web",
             font=_FONT_SM,
             fg_color=_BG3, hover_color=_BG4, text_color=_ACCENT,
-            height=34, corner_radius=8,
+            height=32, corner_radius=8,
             command=self._open_dashboard,
         )
-        self._dashboard_btn.pack(fill="x", pady=(0, 6))
+        self._dashboard_btn.pack(fill="x", pady=(0, 8))
         CTkToolTip(self._dashboard_btn,
                    "Ouvrir le dashboard Flask dans le navigateur\n"
                    f"http://127.0.0.1:{_SERVER_PORT}/\n"
                    "Graphiques, heatmap horaire, export CSV")
 
         # MODE AUTOMATIQUE (daemon)
-        auto = ctk.CTkFrame(parent, fg_color=_BG2, corner_radius=10)
+        auto = ctk.CTkFrame(scroll, fg_color=_BG2, corner_radius=10)
         auto.pack(fill="x")
         ctk.CTkLabel(auto, text="🔁  Mode automatique",
                      font=_FONT_SM, text_color=_FG2).pack(
@@ -1172,7 +1190,7 @@ class App(ctk.CTk):
             self._recorder = ActionRecorder(scenario_name=name, target_app=target_app,
                                              reader=self._ocr_reader)
             self._recorder.start()
-            self._rec_btn.configure(text="  ■  STOP RECORD",
+            self._rec_btn.configure(text="⏺️\nSTOP REC",
                                      fg_color=_RED, hover_color="#B04050")
             self._replay_btn.configure(state="disabled")
             self._status_var.set("⬤ Enregistrement…")
@@ -1181,7 +1199,7 @@ class App(ctk.CTk):
         else:
             path = self._recorder.stop()
             self._recorder = None
-            self._rec_btn.configure(text="  ⬤  RECORD",
+            self._rec_btn.configure(text="🔴\nREC",
                                      fg_color=_GREEN, hover_color="#35A07E")
             name = self._read_scenario_display_name(path)
             self._log_debug(f"■ Scénario sauvegardé : {path.name}", "ok")

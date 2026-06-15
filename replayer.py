@@ -56,6 +56,7 @@ from PIL import Image
 from recorder import screenshot_region, derive_label
 from paths import data_dir
 import winput
+import trace_log
 import stats_db
 import official_log
 
@@ -215,6 +216,9 @@ class ActionReplayer:
         self._stop_event.clear()
         actions = session.get("actions", [])
         total   = len(actions)
+        trace_log.setup()
+        trace_log.log("REPLAY ▶ début (%d actions, gate visuel=%s, moteur clavier=%s)",
+                      total, self.visual_gate, winput.active_typing_backend())
         log.info("Début du replay : %d action(s)", total)
 
         for i, raw in enumerate(actions):
@@ -748,12 +752,30 @@ td.status{{font-weight:700}}
                 except Exception:
                     pass
         elif atype == "type":
+            text = raw.get("text", "")
+            # Traçage AVANT toute action : où part la frappe ?
+            fg_before = winput.foreground_info()
+            trace_log.log("REPLAY ✎ type texte=%r — premier plan AVANT clic : "
+                          "%s (%s) focus=%s",
+                          text, fg_before.get("title"), fg_before.get("proc"),
+                          fg_before.get("focus_class"))
             if x and y:
                 pyautogui.click(x, y)
+                time.sleep(0.15)
+                # v6.4.2 : on FORCE le focus de la fenêtre cible sous le curseur
+                # (corrige les frappes perdues quand le clic ne transfère pas le
+                # focus clavier — elles partaient vers WinGhost ou nulle part).
+                forced = winput.focus_at(x, y)
                 time.sleep(0.1)
-            text = raw.get("text", "")
-            # v6.4 : saisie fiable Unicode (accents é è à ç € inclus) via pynput.
+                fg_after = winput.foreground_info()
+                trace_log.log("REPLAY   après clic (%d,%d) focus forcé=%s — "
+                              "premier plan : %s (%s) focus=%s",
+                              x, y, forced, fg_after.get("title"),
+                              fg_after.get("proc"), fg_after.get("focus_class"))
+            # v6.4 : saisie fiable Unicode (accents é è à ç € inclus).
             sent, total = winput.type_text(text)
+            trace_log.log("REPLAY   type_text → %d/%d caractères émis (moteur=%s)",
+                          sent, total, winput.active_typing_backend())
             if result is not None:
                 result.keys_sent, result.keys_total = sent, total
             if total and sent < total:
@@ -764,6 +786,9 @@ td.status{{font-weight:700}}
         elif atype == "key":
             # v6.4 : touches spéciales fiables (pynput d'abord, repli pyautogui).
             name = raw.get("key", "")
+            fg = winput.foreground_info()
+            trace_log.log("REPLAY ⌨ key=%r — premier plan : %s (%s) focus=%s",
+                          name, fg.get("title"), fg.get("proc"), fg.get("focus_class"))
             ok = winput.press_key(name)
             if result is not None:
                 result.keys_sent  = 1 if ok else 0

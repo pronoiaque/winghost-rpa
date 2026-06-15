@@ -5,7 +5,7 @@
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-6.4.1-green)
+![Version](https://img.shields.io/badge/version-6.4.2-green)
 
 ---
 
@@ -13,6 +13,10 @@
 
 | Correctif | Description |
 |---|---|
+| 🔬 **Trace multi-contextuelle** | Journal `…/debug/winghost_trace.log` qui capture, à l'enregistrement ET au rejeu, ce qui est tapé et **vers quelle fenêtre** part chaque frappe (premier plan + contrôle focalisé avant/après le clic) |
+| 🎯 **Focus forcé au rejeu** | Après le clic d'une saisie, la fenêtre cible est **forcée au premier plan** avant injection → corrige les frappes perdues quand le focus ne suit pas |
+| ⌨️ **Backend `keyboard` (boppreh)** | Ajouté à la chaîne d'injection (SendInput → pynput → keyboard → pyautogui) |
+| 🎛️ **Barre « magnéto » 800×600** | 🔴 REC · ▶️ REPLAY · ⏹️ STOP · 📝 RAPPORT en gros boutons ; réglages dans une zone défilante ; fenêtre tient en 800×600 |
 | 🎯 **Fin de la dérive de la souris** | Le processus devient *per-monitor DPI-aware* (`winput.enable_dpi_awareness()`) : enregistrement (pixels physiques) et rejeu visent le **même repère**, même avec un affichage à 125 %/150 %. Les déplacements ciblent les coordonnées **exactes** (`MINIMUM_DURATION = 0`) |
 | ⌨️ **Saisie clavier fiable (AZERTY + accents)** | Fin des touches « jamais tapées ». Cause racine : `pyautogui` rejoue via des codes de touches **QWERTY** → sur un clavier **français AZERTY** les lettres sont permutées et les accents abandonnés. La saisie passe désormais par **`SendInput` / `KEYEVENTF_UNICODE`** (codepoint Unicode exact, **indépendant de la disposition**), avec repli pynput puis pyautogui |
 | ⏱️ **Délais à la milliseconde** | Cadence mesurée sur `time.perf_counter()` (sous-µs) au lieu de `time.time()` (~15 ms sous Windows) → rejeu fidèle au tempo enregistré |

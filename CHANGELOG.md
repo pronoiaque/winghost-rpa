@@ -5,6 +5,30 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [6.4.2] — 2026-06-15
+
+### Ajouté — Diagnostic clavier multi-contextuel & ergonomie
+
+#### 🔬 Trace multi-contextuelle (enregistrement ↔ rejeu)
+- Nouveau module **`trace_log.py`** : journal horodaté à la ms dans `…/debug/winghost_trace.log` couvrant **les deux phases**
+  - **Enregistrement** : chaque touche capturée, chaque vidage de tampon, chaque action « type »/« key » créée (texte exact)
+  - **Rejeu** : pour chaque frappe, la **fenêtre au premier plan AVANT le clic, APRÈS le clic** (le focus a-t-il bougé ?), le **contrôle qui a le focus clavier**, et le résultat de `type_text`
+- Objectif : distinguer « frappe non émise » de « frappe émise vers la mauvaise fenêtre » (focus resté sur WinGhost / appli cible jamais activée) — la cause la plus probable d'un clavier muet au rejeu alors que l'auto-test réussit
+
+#### 🎯 Focus forcé de la fenêtre cible au rejeu
+- `winput.focus_at(x, y)` : après le clic d'une action « type », WinGhost **force la fenêtre située sous le curseur au premier plan** (`SetForegroundWindow`, repli `BringWindowToTop`) avant d'injecter le texte → corrige les frappes perdues quand le clic ne transfère pas le focus clavier
+- `winput.foreground_info()` : introspection fenêtre active + contrôle focalisé (via `GetGUIThreadInfo`)
+
+#### ⌨️ Backend clavier `keyboard` (boppreh) en secours
+- Chaîne d'injection désormais : **SendInput Unicode → pynput → `keyboard` (hook bas niveau) → pyautogui**
+- `keyboard>=0.13.5` ajouté au build ; signalé dans le Débug dev
+
+#### 🎛️ Interface — barre « magnéto » + format 800×600
+- Les **trois fonctions principales** regroupées en **gros boutons** en haut de la colonne de gauche : **🔴 REC · ▶️ REPLAY · ⏹️ STOP · 📝 RAPPORT**
+- Réglages (enregistrement, scénarios, options, mode auto) déplacés dans une **zone défilante** → la fenêtre tient désormais dans **800×600** (`minsize` abaissé)
+
+---
+
 ## [6.4.1] — 2026-06-15
 
 ### Corrigé

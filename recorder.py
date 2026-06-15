@@ -40,6 +40,7 @@ from pynput import mouse, keyboard
 
 from paths import data_dir
 import winput
+import trace_log
 
 # v6.4 : conscience DPI dès l'import du recorder pour que les coordonnées
 # enregistrées (pixels physiques) coïncident avec celles du rejeu.
@@ -283,6 +284,9 @@ class ActionRecorder:
         )
         self._mouse_listener.start()
         self._keyboard_listener.start()
+        trace_log.setup()
+        trace_log.log("REC ▶ démarrage enregistrement (scénario=%r, app=%r)",
+                      self._scenario_name, self._target_app)
         log.info("⬤ Enregistrement démarré.")
 
     def stop(self) -> Path:
@@ -437,8 +441,10 @@ class ActionRecorder:
             if char and (len(char) != 1 or ord(char) >= 32):
                 self._typed_buffer += char
                 self._last_key_time = t
+                trace_log.log("REC   char=%r → tampon=%r", char, self._typed_buffer)
                 return
             if char:
+                trace_log.log("REC   char de contrôle ignoré (ord=%d)", ord(char))
                 # caractère de contrôle : on bascule en touche spéciale ci-dessous
                 self._flush_typed_buffer()
         except AttributeError:
@@ -447,6 +453,7 @@ class ActionRecorder:
         # Touche spéciale (Enter, Tab, Escape, F-keys…)
         self._flush_typed_buffer()
         key_name = str(key).replace("Key.", "")
+        trace_log.log("REC   touche spéciale=%r", key_name)
         delay = self._compute_delay(t)
 
         # Enter/Tab valident souvent un champ → on capture le contexte
@@ -476,6 +483,8 @@ class ActionRecorder:
     def _flush_typed_buffer(self):
         if not self._typed_buffer:
             return
+        trace_log.log("REC ✎ action « type » créée : texte=%r (len=%d)",
+                      self._typed_buffer, len(self._typed_buffer))
         t = self._last_key_time or time.time()
         delay = self._compute_delay(t)
         cx, cy = pyautogui.position()

@@ -191,6 +191,7 @@ def backends() -> str:
             f"prioritaire = {winput.active_typing_backend()}",
             f"SendInput={winput._HAS_SENDINPUT}",
             f"pynput={winput._HAS_PYNPUT}",
+            f"keyboard(boppreh)={winput._HAS_KEYBOARD_LIB}",
             f"pyautogui={winput.pyautogui is not None}",
         ]
         return " ; ".join(parts)
@@ -289,6 +290,17 @@ def environment_report() -> str:
     L.append("")
     L.append("─── Souris / affichage ───")
     L.append(f"DPI             : {dpi_state()}")
+    L.append("")
+    L.append("─── Trace multi-contextuelle (record ↔ replay) ───")
+    try:
+        import trace_log
+        tp = trace_log.trace_path()
+        L.append(f"Journal de trace : {tp}")
+        L.append("  ↳ Enregistrez UN scénario avec saisie, rejouez-le, puis "
+                 "joignez ce fichier : il montre la fenêtre au premier plan au "
+                 "moment EXACT de chaque frappe (record + replay).")
+    except Exception as e:
+        L.append(f"Journal de trace : (indisponible : {e})")
     L.append("════════════════════════════════════════════════════════════")
     return "\n".join(L)
 
