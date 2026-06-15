@@ -899,6 +899,16 @@ class App(ctk.CTk):
         btn_folder.pack(side="right")
         CTkToolTip(btn_folder, "Ouvrir le dossier des rapports dans l'explorateur")
 
+        btn_debug = ctk.CTkButton(foot, text="🐞 Débug dev", height=28, width=110,
+                                   fg_color=_BG3, hover_color=_BG4,
+                                   text_color=_FG2, font=_FONT_SM, corner_radius=6,
+                                   command=self._open_dev_debug)
+        btn_debug.pack(side="right", padx=(0, 4))
+        CTkToolTip(btn_debug,
+                   "Diagnostic complet de la saisie clavier / souris :\n"
+                   "disposition AZERTY, privilèges (UIPI), DPI, moteurs\n"
+                   "d'injection, auto-test de frappe et inspection du scénario")
+
         btn_json = ctk.CTkButton(foot, text="JSON", height=28, width=60,
                                   fg_color=_BG3, hover_color=_BG4,
                                   text_color=_FG2, font=_FONT_SM, corner_radius=6,
@@ -1443,6 +1453,96 @@ class App(ctk.CTk):
         Path(path).write_text(html, encoding="utf-8")
         self._log_debug(f"Rapport HTML → {path}", "ok")
         webbrowser.open(Path(path).as_uri())
+
+    # ── Débug dev ───────────────────────────────────────────────────────────--
+
+    def _open_dev_debug(self):
+        """Fenêtre de diagnostic : tout ce qui n'est pas testable hors Windows."""
+        import dev_debug
+
+        win = ctk.CTkToplevel(self)
+        win.title("🐞 WinGhost — Débug dev")
+        win.geometry("860x640")
+        win.transient(self)
+
+        ctk.CTkLabel(win, text="Diagnostic saisie clavier / souris",
+                     font=_FONT_H2 if "_FONT_H2" in globals() else _FONT_SM,
+                     text_color=_HEADER).pack(anchor="w", padx=14, pady=(12, 4))
+
+        box = ctk.CTkTextbox(win, font=("Consolas", 12), wrap="word")
+        box.pack(fill="both", expand=True, padx=14, pady=6)
+
+        def _append(txt: str):
+            box.configure(state="normal")
+            box.insert("end", txt + "\n")
+            box.see("end")
+            box.configure(state="disabled")
+
+        # 1) Rapport d'environnement
+        report = dev_debug.environment_report()
+        _append(report)
+
+        # 2) Inspection du scénario sélectionné
+        if self._session_path and self._session_path.exists():
+            _append("\n─── Inspection du scénario sélectionné ───")
+            _append(dev_debug.inspect_scenario(self._session_path))
+        else:
+            _append("\n(aucun scénario sélectionné — sélectionnez-en un pour "
+                    "inspecter les actions clavier enregistrées)")
+
+        # 3) Auto-test de frappe (zone de saisie réelle)
+        test_frame = ctk.CTkFrame(win, fg_color="transparent")
+        test_frame.pack(fill="x", padx=14, pady=(0, 6))
+        ctk.CTkLabel(test_frame, text="Auto-test :", font=_FONT_SM,
+                     text_color=_FG2).pack(side="left", padx=(0, 6))
+        test_entry = ctk.CTkEntry(test_frame, width=380,
+                                  placeholder_text="la frappe simulée s'écrira ici")
+        test_entry.pack(side="left", padx=(0, 8))
+
+        def _run_self_test():
+            expected = dev_debug.TYPING_TEST_STRING
+            test_entry.delete(0, "end")
+            test_entry.focus_set()
+            win.lift()
+            _append("\n─── Auto-test de frappe (3 s, ne touchez pas au clavier) ───")
+            _append(f"   chaîne attendue : {expected!r}")
+
+            def _type():
+                try:
+                    import winput
+                    winput.type_text(expected)
+                except Exception as e:
+                    self.after(0, lambda: _append(f"   (erreur injection : {e})"))
+                self.after(500, _read_back)
+
+            def _read_back():
+                got = test_entry.get()
+                _append("   " + dev_debug.interpret_self_test(expected, got))
+                btn_test.configure(state="normal")
+
+            btn_test.configure(state="disabled")
+            self.after(700, lambda: threading.Thread(target=_type, daemon=True).start())
+
+        btn_test = ctk.CTkButton(test_frame, text="▶ Lancer l'auto-test",
+                                 width=160, font=_FONT_SM,
+                                 fg_color=_ACCENT, hover_color=_BLUE_DARK,
+                                 text_color=_ON_ACCENT, command=_run_self_test)
+        btn_test.pack(side="left")
+
+        # 4) Sauvegarde / copie
+        bottom = ctk.CTkFrame(win, fg_color="transparent")
+        bottom.pack(fill="x", padx=14, pady=(0, 12))
+
+        def _save():
+            full = box.get("0.0", "end")
+            p = dev_debug.save_report(full)
+            _append(f"\n💾 Rapport enregistré : {p}")
+
+        ctk.CTkButton(bottom, text="💾 Enregistrer le rapport", font=_FONT_SM,
+                      fg_color=_BG3, hover_color=_BG4, text_color=_FG2,
+                      command=_save).pack(side="right")
+
+        box.configure(state="disabled")
 
     # ── Journal officiel ──────────────────────────────────────────────────────
 

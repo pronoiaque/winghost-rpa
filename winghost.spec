@@ -37,6 +37,8 @@ datas += collect_data_files("customtkinter")
 hiddenimports = [
     "win32gui", "win32process", "win32api", "win32con",
     "psutil", "pystray._win32", "PIL._tkinter_finder",
+    # Modules importés paresseusement (dans des fonctions) → forcés ici.
+    "winput", "dev_debug",
 ]
 hiddenimports += collect_submodules("flask")
 

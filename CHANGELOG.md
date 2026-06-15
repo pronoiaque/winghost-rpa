@@ -14,10 +14,21 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 - **Correctif** : nouveau module **`winput.py`** — `enable_dpi_awareness()` rend le processus *per-monitor DPI-aware* (API `SetProcessDpiAwarenessContext`, replis `shcore` puis `SetProcessDPIAware`) **avant toute capture/clic**. Appelé au plus tôt depuis le recorder, le replayer, le scheduler et l'IHM
 - `pyautogui.MINIMUM_DURATION = 0` : les déplacements visent désormais les coordonnées **exactes**, sans tween parasite
 
-#### ⌨️ Touches « jamais tapées » corrigées (saisie Unicode fiable)
-- **Cause** : `pyautogui.typewrite()` **ignore silencieusement** tout caractère hors de son jeu ASCII — soit **tous les accents français** (é è à ç ù…), l'€, etc. Le texte français disparaissait en grande partie
-- **Correctif** : `winput.type_text()` injecte le texte via **`pynput.keyboard.Controller`** (injection Unicode native Windows), caractère par caractère, avec repli pyautogui. `winput.press_key()` gère les touches spéciales avec une table de correspondance étendue (page_up/down, F1–F20, modificateurs, alt_gr…)
+#### ⌨️ Touches « jamais tapées » corrigées (injection Unicode indépendante de la disposition)
+- **Cause racine (clavier AZERTY)** : `pyautogui` rejoue chaque caractère via des **codes de touches virtuels supposés QWERTY**. Sur un poste **français AZERTY** (cas du CHU), les lettres sont **permutées** (VK_A → « q »), les chiffres/symboles **erronés**, et les accents (é è à ç ù), l'€, etc. **purement abandonnés**. Sur du texte français saisi sur un système français, le résultat est qu'**aucun caractère exploitable** ne sort — d'où « aucun caractère n'est rejoué »
+- **Correctif** : `winput.type_text()` injecte désormais via l'API Win32 **`SendInput` / `KEYEVENTF_UNICODE`** — qui envoie le **codepoint Unicode exact, indépendamment de la disposition clavier**. Chaîne de repli : SendInput → `pynput` (Unicode aussi) → `pyautogui` (dernier recours)
+- `winput.press_key()` gère les touches spéciales avec une table étendue (page_up/down, F1–F20, modificateurs, alt_gr…)
 - À l'enregistrement, les **caractères de contrôle** issus des combinaisons Ctrl/Alt (ex. Ctrl+A → `\x01`) ne polluent plus la saisie bufferisée
+
+#### 🐞 Bouton « Débug dev » (diagnostic post-mortem)
+- Nouveau module **`dev_debug.py`** + bouton **🐞 Débug dev** : rassemble tout ce qui n'est pas observable hors Windows et explique une saisie qui n'aboutit pas —
+  - **disposition clavier active** (détection AZERTY ⇒ pyautogui inadapté) ;
+  - **privilèges / UIPI** : admin + niveau d'intégrité du processus et **de la fenêtre cible** (si la cible est élevée et pas WinGhost, Windows bloque *silencieusement* toute frappe synthétique) ;
+  - **conscience DPI / mise à l'échelle** (dérive souris) ;
+  - **moteurs d'injection disponibles + code de retour réel de `SendInput`** ;
+  - **auto-test de frappe** : tape une chaîne connue dans un champ et relit ce qui est réellement arrivé (échec total vs brouillage QWERTY/AZERTY) ;
+  - **inspection du scénario** : nombre d'actions « type »/« key », textes, champs vides
+- Rapport exportable dans `…/debug/`
 
 #### ⏱️ Métrique de temps à la milliseconde (horloge haute résolution)
 - Les délais inter-actions sont désormais mesurés sur **`time.perf_counter()`** (sous-microseconde) au lieu de `time.time()` (granularité ~15 ms sous Windows) → cadence du rejeu fidèle à l'enregistrement. Le timestamp epoch lisible est conservé pour l'horodatage
@@ -27,9 +38,11 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 - Nouveaux champs `keys_sent` / `keys_total` sur `ActionResult` (JSON de rapport) et **nouvelle colonne « Clavier »** (`✔ n/m` ou `⚠ n/m`) dans le rapport HTML
 
 ### Détails techniques
-- **`winput.py`** : `enable_dpi_awareness()` (idempotent, sans exception, no-op hors Windows), `now()` (perf_counter), `type_text(text, interval)`, `press_key(name)`
+- **`winput.py`** : `enable_dpi_awareness()` (idempotent, sans exception, no-op hors Windows), `now()` (perf_counter), `type_text(text, interval)` (SendInput Unicode → pynput → pyautogui), `press_key(name)`, `active_typing_backend()`, helpers `SendInput` (structures ctypes `INPUT`/`KEYBDINPUT`)
+- **`dev_debug.py`** : `environment_report()`, `keyboard_layout()`, `integrity_level()`, `foreground_window()`, `dpi_state()`, `sendinput_probe()`, `inspect_scenario()`, `interpret_self_test()`, `save_report()`
 - `recorder.py` : `_compute_delay()` bascule sur l'horloge monotone ; filtrage des caractères de contrôle dans `_on_key_press`
 - `replayer.py` : `_execute()` utilise `winput` pour `type`/`key` et renseigne `keys_sent`/`keys_total` ; `MINIMUM_DURATION = 0`
+- `gui.py` : bouton 🐞 Débug dev + fenêtre `_open_dev_debug()` (rapport, auto-test de frappe en direct, export)
 
 ---
 

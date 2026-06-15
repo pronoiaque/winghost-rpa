@@ -50,6 +50,88 @@ except Exception:                                   # pragma: no cover
     pyautogui = None
 
 
+# ─── Injection bas niveau Win32 SendInput (KEYEVENTF_UNICODE) ─────────────────
+# C'est la méthode de référence et la SEULE indépendante de la disposition
+# clavier : elle injecte le CODEPOINT Unicode exact, peu importe que le poste
+# soit en AZERTY (français) ou QWERTY. pyautogui, lui, repasse chaque caractère
+# par des codes de touches virtuels supposés QWERTY → sur un clavier français
+# les lettres sont brouillées et les accents/symboles perdus.
+_HAS_SENDINPUT = False
+if sys.platform.startswith("win"):
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        _ULONG_PTR = ctypes.POINTER(ctypes.c_ulong)
+
+        class _KEYBDINPUT(ctypes.Structure):
+            _fields_ = [
+                ("wVk", wintypes.WORD),
+                ("wScan", wintypes.WORD),
+                ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", _ULONG_PTR),
+            ]
+
+        class _MOUSEINPUT(ctypes.Structure):
+            _fields_ = [
+                ("dx", wintypes.LONG),
+                ("dy", wintypes.LONG),
+                ("mouseData", wintypes.DWORD),
+                ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", _ULONG_PTR),
+            ]
+
+        class _INPUTunion(ctypes.Union):
+            _fields_ = [("ki", _KEYBDINPUT), ("mi", _MOUSEINPUT)]
+
+        class _INPUT(ctypes.Structure):
+            _anonymous_ = ("u",)
+            _fields_ = [("type", wintypes.DWORD), ("u", _INPUTunion)]
+
+        _INPUT_KEYBOARD = 1
+        _KEYEVENTF_KEYUP = 0x0002
+        _KEYEVENTF_UNICODE = 0x0004
+        _user32 = ctypes.windll.user32
+        _user32.SendInput.argtypes = (
+            wintypes.UINT, ctypes.POINTER(_INPUT), ctypes.c_int)
+        _user32.SendInput.restype = wintypes.UINT
+        _HAS_SENDINPUT = True
+    except Exception:                               # pragma: no cover
+        _HAS_SENDINPUT = False
+
+
+def _sendinput_unicode_char(ch: str) -> tuple[bool, int, int]:
+    """
+    Injecte un caractère via SendInput/KEYEVENTF_UNICODE (indépendant de la
+    disposition clavier). Renvoie (succès, n_evenements_inserés, GetLastError).
+
+    n_inseré < 2 ou erreur ≠ 0 signale en général un BLOCAGE par UIPI :
+    l'application cible tourne avec des privilèges plus élevés que WinGhost.
+    """
+    if not _HAS_SENDINPUT:
+        return (False, 0, 0)
+    code = ord(ch)
+    # Hors du plan multilingue de base : paire de substitution (rare) — ignoré.
+    if code > 0xFFFF:
+        return (False, 0, 0)
+
+    down = _INPUT(type=_INPUT_KEYBOARD,
+                  u=_INPUTunion(ki=_KEYBDINPUT(
+                      wVk=0, wScan=code, dwFlags=_KEYEVENTF_UNICODE,
+                      time=0, dwExtraInfo=None)))
+    up = _INPUT(type=_INPUT_KEYBOARD,
+                u=_INPUTunion(ki=_KEYBDINPUT(
+                    wVk=0, wScan=code,
+                    dwFlags=_KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP,
+                    time=0, dwExtraInfo=None)))
+    arr = (_INPUT * 2)(down, up)
+    n = _user32.SendInput(2, arr, ctypes.sizeof(_INPUT))
+    err = ctypes.get_last_error() if n != 2 else 0
+    return (n == 2, n, err)
+
+
 # ─── 1. Conscience DPI (corrige la dérive de la souris) ───────────────────────
 
 _dpi_done = False
@@ -115,12 +197,18 @@ def now() -> float:
 
 def type_text(text: str, interval: float = 0.012) -> tuple[int, int]:
     """
-    Tape `text` caractère par caractère de façon fiable, accents compris.
+    Tape `text` caractère par caractère de façon fiable et INDÉPENDANTE de la
+    disposition clavier (AZERTY français inclus), accents compris.
 
-    Utilise pynput (injection Unicode native sous Windows) en priorité, avec
-    repli pyautogui par caractère. Renvoie (n_emis, n_total) pour permettre une
-    vérification dans les journaux : si n_emis < n_total, des caractères ont été
-    refusés par la cible.
+    Ordre des moteurs d'injection (du plus fiable au repli) :
+      1. SendInput / KEYEVENTF_UNICODE (Win32 natif, indépendant de la
+         disposition) — injecte le codepoint exact ;
+      2. pynput.keyboard.Controller (utilise aussi l'injection Unicode) ;
+      3. pyautogui.write (ASCII / QWERTY uniquement — dernier recours).
+
+    Renvoie (n_emis, n_total). Si n_emis < n_total, des caractères ont été
+    refusés par la cible (souvent un blocage UIPI : l'application tourne avec
+    des privilèges plus élevés que WinGhost).
     """
     if not text:
         return (0, 0)
@@ -129,27 +217,48 @@ def type_text(text: str, interval: float = 0.012) -> tuple[int, int]:
     sent = 0
     for ch in text:
         ok = False
-        if _HAS_PYNPUT:
+
+        # 1) SendInput Unicode (référence, indépendant de la disposition)
+        if _HAS_SENDINPUT:
+            ok, _n, _err = _sendinput_unicode_char(ch)
+
+        # 2) pynput (injection Unicode également)
+        if not ok and _HAS_PYNPUT:
             try:
-                _kb.type(ch)                # gère é è à ç €… via Unicode
+                _kb.type(ch)
                 ok = True
             except Exception:
                 ok = False
+
+        # 3) pyautogui (ASCII/QWERTY — peut brouiller un clavier français)
         if not ok and pyautogui is not None:
             try:
-                pyautogui.write(ch)         # repli ASCII
+                pyautogui.write(ch)
                 ok = True
             except Exception:
                 ok = False
+
         if ok:
             sent += 1
         if interval:
             time.sleep(interval)
 
     if sent < total:
-        log.warning("Saisie partielle : %d/%d caractères émis pour %r",
+        log.warning("Saisie partielle : %d/%d caractères émis pour %r "
+                    "(blocage UIPI probable : cible plus privilégiée ?)",
                     sent, total, text[:40])
     return (sent, total)
+
+
+def active_typing_backend() -> str:
+    """Nom du moteur de saisie qui sera utilisé en priorité (pour le débug)."""
+    if _HAS_SENDINPUT:
+        return "SendInput/Unicode (Win32, indépendant disposition)"
+    if _HAS_PYNPUT:
+        return "pynput.Controller (Unicode)"
+    if pyautogui is not None:
+        return "pyautogui.write (ASCII/QWERTY — repli)"
+    return "AUCUN — aucune injection clavier disponible"
 
 
 # ─── 4. Touches spéciales fiables ─────────────────────────────────────────────
