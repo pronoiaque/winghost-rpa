@@ -5,6 +5,19 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [6.4.1] — 2026-06-15
+
+### Corrigé
+
+- **Numéros de version affichés** : le titre de la fenêtre, le splash et le bandeau affichaient encore **v6.3** dans le binaire v6.4 → corrigés en **v6.4**
+- **Diagnostic « Intégrité proc. » (Débug dev)** : renvoyait « token inaccessible » à cause de signatures `ctypes` manquantes (pseudo-handle 64 bits tronqué). Signatures `argtypes`/`restype` explicites ajoutées (`OpenProcessToken`, `GetTokenInformation`, `GetSidSubAuthority*`) + handle de token désormais fermé proprement. Le niveau d'intégrité (Medium/High/System) est maintenant correctement rapporté — essentiel pour détecter un blocage **UIPI** (cible élevée)
+- **Versions des bibliothèques (Débug dev)** : `pynput=?` corrigé via repli `importlib.metadata` (pynput n'expose pas `__version__`)
+
+### Validé (rapport de débug poste CHU)
+- Disposition **AZERTY** confirmée comme cause racine ; **`SendInput OK`** ; auto-test de frappe **22/22 caractères identiques** (accents `é è à ç ù €` inclus) → le correctif clavier v6.4 fonctionne sur poste français
+
+---
+
 ## [6.4.0] — 2026-06-15
 
 ### Corrigé — Précision des entrées (enregistrement / rejeu)

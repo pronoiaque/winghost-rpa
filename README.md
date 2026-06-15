@@ -5,7 +5,7 @@
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-6.4.0-green)
+![Version](https://img.shields.io/badge/version-6.4.1-green)
 
 ---
 

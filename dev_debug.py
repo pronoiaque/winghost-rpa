@@ -85,28 +85,53 @@ def integrity_level() -> str:
     import ctypes
     from ctypes import wintypes
     try:
+        # v6.4.1 : signatures ctypes EXPLICITES. Sans elles, le pseudo-handle
+        # 64 bits de GetCurrentProcess() est tronqué (ctypes suppose c_int),
+        # OpenProcessToken échoue → « token inaccessible ».
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        adv = ctypes.WinDLL("advapi32", use_last_error=True)
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        adv.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                         ctypes.POINTER(wintypes.HANDLE)]
+        adv.OpenProcessToken.restype = wintypes.BOOL
+        adv.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                            ctypes.c_void_p, wintypes.DWORD,
+                                            ctypes.POINTER(wintypes.DWORD)]
+        adv.GetTokenInformation.restype = wintypes.BOOL
+        adv.GetSidSubAuthorityCount.argtypes = [ctypes.c_void_p]
+        adv.GetSidSubAuthorityCount.restype = ctypes.POINTER(ctypes.c_ubyte)
+        adv.GetSidSubAuthority.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+        adv.GetSidSubAuthority.restype = ctypes.POINTER(wintypes.DWORD)
+
         TOKEN_QUERY = 0x0008
         TokenIntegrityLevel = 25
-        hproc = ctypes.windll.kernel32.GetCurrentProcess()
+
+        class SID_AND_ATTRIBUTES(ctypes.Structure):
+            _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wintypes.DWORD)]
+
+        class TOKEN_MANDATORY_LABEL(ctypes.Structure):
+            _fields_ = [("Label", SID_AND_ATTRIBUTES)]
+
         htok = wintypes.HANDLE()
-        if not ctypes.windll.advapi32.OpenProcessToken(
-                hproc, TOKEN_QUERY, ctypes.byref(htok)):
-            return "(token inaccessible)"
-        size = wintypes.DWORD()
-        ctypes.windll.advapi32.GetTokenInformation(
-            htok, TokenIntegrityLevel, None, 0, ctypes.byref(size))
-        buf = ctypes.create_string_buffer(size.value)
-        if not ctypes.windll.advapi32.GetTokenInformation(
-                htok, TokenIntegrityLevel, buf, size, ctypes.byref(size)):
-            return "(lecture échouée)"
-        # TOKEN_MANDATORY_LABEL : SID dont le dernier sous-autorité = RID niveau
-        sid = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0]
-        count_ptr = ctypes.windll.advapi32.GetSidSubAuthorityCount(sid)
-        count = ctypes.cast(count_ptr, ctypes.POINTER(ctypes.c_ubyte))[0]
-        rid_ptr = ctypes.windll.advapi32.GetSidSubAuthority(sid, count - 1)
-        rid = ctypes.cast(rid_ptr, ctypes.POINTER(wintypes.DWORD))[0]
+        if not adv.OpenProcessToken(k32.GetCurrentProcess(), TOKEN_QUERY,
+                                    ctypes.byref(htok)):
+            return f"(token inaccessible, err={ctypes.get_last_error()})"
+        try:
+            size = wintypes.DWORD()
+            adv.GetTokenInformation(htok, TokenIntegrityLevel, None, 0,
+                                    ctypes.byref(size))
+            buf = ctypes.create_string_buffer(size.value)
+            if not adv.GetTokenInformation(htok, TokenIntegrityLevel, buf, size,
+                                           ctypes.byref(size)):
+                return f"(lecture échouée, err={ctypes.get_last_error()})"
+            tml = ctypes.cast(buf, ctypes.POINTER(TOKEN_MANDATORY_LABEL)).contents
+            sid = tml.Label.Sid
+            count = adv.GetSidSubAuthorityCount(sid).contents.value
+            rid = adv.GetSidSubAuthority(sid, count - 1).contents.value
+        finally:
+            k32.CloseHandle(htok)
         levels = {0x0000: "Untrusted", 0x1000: "Low", 0x2000: "Medium",
-                  0x3000: "High", 0x4000: "System"}
+                  0x2100: "Medium+", 0x3000: "High", 0x4000: "System"}
         return levels.get(rid, f"0x{rid:04X}")
     except Exception as e:
         return f"(erreur: {e})"
@@ -174,13 +199,25 @@ def backends() -> str:
 
 
 def versions() -> str:
+    import importlib.metadata as md
+    # Nom d'import → nom de distribution (pour importlib.metadata).
+    dist = {"PIL": "Pillow"}
     out = []
     for mod in ("pyautogui", "pynput", "numpy", "PIL", "customtkinter"):
+        ver = None
         try:
             m = __import__(mod)
-            out.append(f"{mod}={getattr(m, '__version__', '?')}")
+            ver = getattr(m, "__version__", None)
         except Exception:
             out.append(f"{mod}=absent")
+            continue
+        if not ver:
+            # pynput n'expose pas __version__ → on lit les métadonnées du paquet.
+            try:
+                ver = md.version(dist.get(mod, mod))
+            except Exception:
+                ver = "?"
+        out.append(f"{mod}={ver}")
     return " ; ".join(out)
 
 
