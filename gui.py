@@ -93,6 +93,7 @@ except Exception:
     _HAS_TRAY = False
 
 from paths import resource_path, data_dir
+from version import __version__ as APP_VERSION
 
 # Compat : chercher scénarios dans les deux dossiers (migration v3→v4)
 _LEGACY_SESSIONS_DIR = data_dir() / "sessions"
@@ -287,7 +288,7 @@ class _ScenarioRow(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("CHU Toulouse — WinGhost RPA v6.4")
+        self.title(f"CHU Toulouse — WinGhost RPA v{APP_VERSION}")
         self.configure(fg_color=_BG)
         self.minsize(1000, 700)
         self._center_window(1060, 740)
@@ -355,7 +356,7 @@ class App(ctk.CTk):
             ctk.CTkLabel(splash, image=logo_big, text="").pack(pady=(26, 2))
         ctk.CTkLabel(splash, text="CHU Toulouse — WinGhost RPA",
                      font=("Segoe UI Bold", 22), text_color=_ACCENT).pack(pady=(2, 2))
-        ctk.CTkLabel(splash, text="v6.4 — Robot Process Automation",
+        ctk.CTkLabel(splash, text=f"v{APP_VERSION} — Robot Process Automation",
                      font=("Segoe UI", 12), text_color=_FG2).pack()
         ctk.CTkLabel(splash, text="© CHU Toulouse 2026",
                      font=("Segoe UI", 9), text_color=_FG2).pack(side="bottom", pady=10)
@@ -458,7 +459,7 @@ class App(ctk.CTk):
         if logo_img is not None:
             ctk.CTkLabel(header, image=logo_img, text="").pack(side="left", padx=(16, 8))
 
-        ctk.CTkLabel(header, text="CHU Toulouse  ·  WinGhost RPA v6.4",
+        ctk.CTkLabel(header, text=f"CHU Toulouse  ·  WinGhost RPA v{APP_VERSION}",
                      font=_FONT_H1, text_color=_HEADER_FG).pack(
             side="left", padx=(0, 20))
 

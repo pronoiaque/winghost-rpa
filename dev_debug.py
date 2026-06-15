@@ -262,8 +262,12 @@ def inspect_scenario(path: Path) -> str:
 # ─── Rapport global ────────────────────────────────────────────────────────────
 
 def environment_report() -> str:
+    try:
+        from version import __version__ as _ver
+    except Exception:
+        _ver = "?"
     L = []
-    L.append("══════════ WinGhost — Rapport de débug dev (v6.4) ══════════")
+    L.append(f"══════════ WinGhost — Rapport de débug dev (v{_ver}) ══════════")
     L.append(f"Date            : {datetime.now().isoformat(timespec='seconds')}")
     L.append(f"OS              : {platform.platform()}")
     L.append(f"Python          : {sys.version.split()[0]} ({platform.machine()})")
