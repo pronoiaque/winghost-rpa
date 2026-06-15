@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "winghost-monitor"
-version = "0.1.0"
+version = "0.1.1"
 description = "Supervision de la performance applicative (CHU Toulouse) : RPA visuel à 4 couches — recorder, replayer à ancrage OpenCV, chronomètre visuel + KPI SQLite, scheduler par plage horaire et dashboard HTML autonome"
 readme = "README.md"
 license = { file = "LICENSE" }

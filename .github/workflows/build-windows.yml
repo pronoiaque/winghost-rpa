@@ -1,0 +1,67 @@
+name: Build Windows x64 (winmonitor.exe)
+
+# Produit l'exécutable mono-fichier de la CLI WinGhost Monitor via PyInstaller.
+#   • à chaque push sur main ou redesign/** (artefact téléchargeable)
+#   • à la demande (workflow_dispatch)
+#   • à chaque tag v* → publication d'une Release avec l'exe attaché
+#
+# OpenCV est EMBARQUÉ (ancrage visuel obligatoire). PyInstaller ne cross-compile
+# pas → ce job DOIT tourner sur windows-latest.
+
+on:
+  push:
+    branches: [main, "redesign/**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # nécessaire pour créer la Release sur tag
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12 (x64)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: "x64"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      - name: Vérifier la cohérence des versions (version.py == pyproject.toml)
+        run: python tools/check_version.py
+
+      - name: Build single-file binary
+        run: pyinstaller --noconfirm --clean winghost-monitor.spec
+
+      - name: Smoke test (la CLI démarre et affiche sa version)
+        shell: pwsh
+        run: |
+          if (-Not (Test-Path dist/winmonitor.exe)) {
+            Write-Error "dist/winmonitor.exe introuvable"; exit 1
+          }
+          $size = (Get-Item dist/winmonitor.exe).Length / 1MB
+          Write-Host ("Binaire produit : {0:N1} Mo" -f $size)
+          ./dist/winmonitor.exe --version
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winmonitor-windows-x64
+          path: dist/winmonitor.exe
+          if-no-files-found: error
+
+      - name: Publish to Release (sur tag uniquement)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/winmonitor.exe
+          fail_on_unmatched_files: true

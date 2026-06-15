@@ -8,7 +8,7 @@
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-0.1.0-orange)
+![Version](https://img.shields.io/badge/version-0.1.1-orange)
 
 > ℹ️ **Refonte (fork) de WinGhost RPA.** Le code historique d'enregistrement /
 > rejeu (v6.x, monolithe Tkinter) reste disponible sur la branche `main`. Ce
@@ -52,6 +52,26 @@ Scheduler                  APScheduler par plage horaire (08h-09h, 12h, 17h…) 
 
 ```bash
 pip install -r requirements.txt          # ou : pip install -e .
+```
+
+### Exécutable Windows (sans Python)
+
+Pour un déploiement sur poste CHU sans installation Python, un binaire
+mono-fichier `winmonitor.exe` est produit par GitHub Actions
+(`.github/workflows/build-windows.yml`, PyInstaller sur `windows-latest`) :
+
+- **téléchargeable** comme artefact à chaque push (onglet *Actions*) ;
+- **publié en Release** sur tag `v*` (ex. `v0.1.1`).
+
+L'exe embarque OpenCV (ancrage visuel), pynput, MSS et APScheduler. Il expose
+la même CLI : `winmonitor.exe record|replay|schedule|dashboard|report`.
+
+Build local (sur Windows) :
+
+```powershell
+pip install -r requirements-build.txt
+pyinstaller --noconfirm --clean winghost-monitor.spec
+.\dist\winmonitor.exe --version
 ```
 
 ## Utilisation

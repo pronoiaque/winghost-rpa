@@ -8,6 +8,22 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [0.1.1] — 2026-06-15
+
+### Ajouté — Build Windows (exécutable mono-fichier)
+
+- **`winghost-monitor.spec`** : recette PyInstaller produisant `dist/winmonitor.exe`,
+  la CLI packagée. OpenCV est désormais **embarqué** (ancrage visuel obligatoire,
+  contrairement au build « léger » v6.x) via `opencv-python-headless`
+- **`run_winmonitor.py`** : point d'entrée packagé (tire `winmonitor` + `version.py`)
+- **`.github/workflows/build-windows.yml`** : build sur `windows-latest` à chaque
+  push (`main`, `redesign/**`) et à la demande ; **Release** attachée sur tag `v*` ;
+  smoke test `winmonitor.exe --version`
+- **`requirements-build.txt`** : dépendances de packaging (toutes les couches +
+  `pyinstaller`)
+
+---
+
 ## [0.1.0] — 2026-06-15
 
 ### Ajouté — Refonte complète « table rase » en 4 couches

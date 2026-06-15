@@ -6,4 +6,4 @@ lire `__version__` ici, jamais une chaîne en dur. Le workflow CI vérifie la
 cohérence avec `pyproject.toml`.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

@@ -1,0 +1,22 @@
+# ─── Dépendances du BINAIRE Windows (PyInstaller) ────────────────────────────
+# Contrairement au build « léger » v6.x, OpenCV est EMBARQUÉ : l'ancrage visuel
+# (matchTemplate) est au cœur de la Couche 2, il n'est plus optionnel.
+# Version headless d'OpenCV : pas de dépendances GUI Qt inutiles dans l'exe.
+
+# Couches 1 & 2 — capture, ancrage visuel, injection
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+mss>=9.0.0
+pynput>=1.7.6
+pyautogui>=0.9.54
+Pillow>=10.0.0
+screeninfo>=0.8.1
+
+# Scheduler
+APScheduler>=3.10.0
+
+# Windows
+pywin32>=306
+
+# Empaquetage
+pyinstaller>=6.3.0
