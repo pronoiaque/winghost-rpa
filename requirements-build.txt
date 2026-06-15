@@ -1,16 +1,15 @@
-# ─── Dépendances du BINAIRE LÉGER Windows (PyInstaller) ───────────────────────
-# Identique à requirements.txt MAIS SANS easyocr / torch (≈ build léger ~200 Mo).
-# L'ancrage visuel OCR est optionnel (décoché par défaut depuis la v6.3) : le
-# binaire produit ne l'embarque pas. Pour une build complète avec OCR, ajouter
-# easyocr (qui tire torch) et adapter winghost.spec (retirer les `excludes`).
+# ─── Dépendances du BINAIRE Windows (PyInstaller) ────────────────────────────
+# EasyOCR/torch supprimés en v6.6 → remplacés par opencv-python-headless.
+# La localisation dynamique (template matching OpenCV) est incluse dans le build.
 
 # Automatisation bureau
 pyautogui>=0.9.54
 pynput>=1.7.6
 
-# Traitement image
+# Traitement image + template matching (remplace EasyOCR/torch)
 Pillow>=10.0.0
 numpy>=1.24.0
+opencv-python-headless>=4.8.0
 
 # Détection multi-moniteurs
 screeninfo>=0.8.1

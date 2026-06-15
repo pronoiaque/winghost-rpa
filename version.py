@@ -10,4 +10,4 @@ Pour publier une nouvelle version : bumper ICI, mettre à jour CHANGELOG.md /
 README.md, committer — le build CI se déclenche tout seul sur push vers main.
 """
 
-__version__ = "6.4.3"
+__version__ = "6.6.0"

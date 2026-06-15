@@ -2,19 +2,14 @@
 """
 winghost.spec — Recette PyInstaller pour produire un binaire Windows x64 unique.
 
-Build LÉGER (v6.3) : EasyOCR / PyTorch sont EXCLUS. L'ancrage visuel OCR est
-optionnel (décoché par défaut) ; le binaire fonctionne pour le RPA pur
-(enregistrement / rejeu des clics, saisies, molette, glisser, mouvements,
-timing, dashboard web, mode automatique).
+Build LÉGER (v6.6) : EasyOCR / PyTorch sont SUPPRIMÉS définitivement.
+La localisation dynamique s'appuie sur OpenCV (template matching multi-échelle)
+embarqué dans le binaire via `locator.py`.
 
 Compilation (sur Windows x64 uniquement — PyInstaller ne cross-compile pas) :
     pip install pyinstaller
     pyinstaller --noconfirm winghost.spec
     => dist/WinGhost.exe
-
-Pour une variante COMPLÈTE avec OCR embarqué, retirer 'torch', 'torchvision',
-'easyocr' (et leurs amis) de `excludes` et installer ces paquets avant le build
-(le binaire grimpera alors à ~1,5–2,5 Go).
 """
 
 from pathlib import Path
@@ -39,13 +34,15 @@ hiddenimports = [
     "psutil", "pystray._win32", "PIL._tkinter_finder",
     # Modules importés paresseusement (dans des fonctions) → forcés ici.
     "winput", "dev_debug", "version", "trace_log", "keyboard",
+    # Localisation dynamique template matching (v6.6)
+    "locator", "cv2",
 ]
 hiddenimports += collect_submodules("flask")
 
 # ─── Modules lourds explicitement exclus (binaire léger) ──────────────────────
 excludes = [
     "torch", "torchvision", "torchaudio",
-    "easyocr", "cv2", "scipy", "skimage", "scikit-image",
+    "easyocr", "scipy", "skimage", "scikit-image",
     "matplotlib", "pandas", "IPython", "notebook", "jupyter",
     "pytest", "test", "tkinter.test",
 ]

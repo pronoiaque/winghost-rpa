@@ -1,24 +1,21 @@
 """
 recorder.py — Enregistrement des actions utilisateur (clics + saisies)
-avec capture visuelle de la zone cible via EasyOCR.
+avec capture de la zone cible (screenshot patch utilisé par locator.py
+pour le template matching au rejeu).
+
+v6.6 : suppression EasyOCR — les screenshots restent capturés et servent
+       de patron pour la relocalisation dynamique (locator.py).
 
 v6.1 : capture de TOUS les inputs souris — clic milieu (middle_click),
-       molette (scroll), glisser-déposer (drag press→release)
+       molette (scroll), glisser-déposer (drag press->release)
 
-v6 : enregistrement des mouvements souris (action "move", throttlé)
-     + paramètre `reader` pour réutiliser un lecteur OCR déjà chargé
+v6 : enregistrement des mouvements souris (action "move", throttle)
+     + parametre `reader` pour retrocompatibilite (ignore silencieusement)
 
-v5 : ajout du champ `target_app` au niveau du scénario (nom d'application
-     ciblée, saisi par l'utilisateur, inscrit tel quel dans le journal officiel)
+v5 : ajout du champ `target_app` au niveau du scenario.
 
-v4 : ajout du champ `app_name` sur chaque Action (nom de l'application au
-     premier plan au moment de l'action, via win32gui/psutil)
-     + SCENARIOS_DIR pour la sortie des fichiers de scénario
-     + scenario_name paramètre sur ActionRecorder
-     + captures de screenshots toujours activées (padding 160 px)
-
-v2 : ajout du champ `label` (nom humain de la cible déduit de l'OCR)
-     + support multi-moniteurs (capture sur l'écran contenant le curseur)
+v4 : ajout du champ `app_name` sur chaque Action (via win32gui/psutil)
+     + SCENARIOS_DIR, scenario_name, screenshots systématiques.
 
 Sortie : scenarios/scenario_YYYYMMDD_HHMMSS.json
 """
@@ -46,15 +43,8 @@ import trace_log
 # enregistrées (pixels physiques) coïncident avec celles du rejeu.
 winput.enable_dpi_awareness()
 
-# EasyOCR est OPTIONNEL (v6.3+) : il tire PyTorch (lourd) et n'est requis que
-# pour l'ancrage visuel. On l'importe paresseusement ; absent, l'enregistrement
-# fonctionne sans label OCR (les screenshots restent capturés).
-try:
-    import easyocr
-    _HAS_EASYOCR = True
-except Exception:
-    easyocr = None
-    _HAS_EASYOCR = False
+# v6.6 : EasyOCR supprimé. Les screenshots sont capturés pour le template
+# matching (locator.py). Plus de dépendance PyTorch.
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -251,17 +241,11 @@ class ActionRecorder:
         self._last_move_x:    int   = 0
         self._last_move_y:    int   = 0
 
+        # v6.6 : EasyOCR supprimé — le paramètre `reader` est conservé pour la
+        # rétrocompatibilité des appelants mais ignoré silencieusement.
+        self._reader = None
         if reader is not None:
-            log.info("Utilisation du lecteur OCR partagé.")
-            self._reader = reader
-        elif _HAS_EASYOCR:
-            log.info("Initialisation EasyOCR (langues : %s)…", OCR_LANGUAGES)
-            self._reader = easyocr.Reader(OCR_LANGUAGES, gpu=False, verbose=False)
-            log.info("EasyOCR prêt.")
-        else:
-            log.warning("EasyOCR indisponible — enregistrement sans label OCR "
-                        "(les screenshots restent capturés).")
-            self._reader = None
+            log.debug("Paramètre reader ignoré (EasyOCR supprimé en v6.6).")
 
     # ── Contrôle ──────────────────────────────────────────────────────────────
 
@@ -524,16 +508,14 @@ class ActionRecorder:
 
     def _capture_visual_context(self, x: int, y: int,
                                 action_type: str = "click") -> Optional[VisualContext]:
-        """Screenshot de la région autour du point, puis OCR + label."""
+        """Screenshot du patch autour du point (utilisé comme template au rejeu)."""
         try:
             img, region = screenshot_region(x, y, SCREENSHOT_PADDING)
 
-            if self._reader is not None:
-                img_np   = np.array(img)
-                results  = self._reader.readtext(img_np, detail=0)
-                ocr_text = " | ".join(results).strip()
-            else:
-                ocr_text = ""   # OCR indisponible : contexte visuel sans texte
+            # v6.6 : plus d'OCR. Le label reste un nom fonctionnel basé sur le
+            # type d'action (ex. "Clic", "Saisie") ; le screenshot sert de
+            # patron pour locator.py (template matching multi-échelle).
+            ocr_text = ""
             label = derive_label(ocr_text, action_type)
 
             ctx = VisualContext(

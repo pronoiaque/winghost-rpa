@@ -1,11 +1,34 @@
-# WinGhost RPA v6.4 — CHU Toulouse
+# WinGhost RPA v6.6 — CHU Toulouse
 
-> Enregistreur / Rejoueur RPA Windows **aux couleurs du CHU de Toulouse**, avec ancrage visuel OCR **optionnel**, capture de tous les inputs souris (clics, molette, glisser), enregistrement des mouvements, splash screen de démarrage, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
+> Enregistreur / Rejoueur RPA Windows **aux couleurs du CHU de Toulouse**, avec localisation dynamique par **template matching OpenCV** (remplace EasyOCR), capture de tous les inputs souris (clics, molette, glisser), enregistrement des mouvements, splash screen de démarrage, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
 
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-6.4.3-green)
+![Version](https://img.shields.io/badge/version-6.6.0-green)
+
+---
+
+## Nouveautés v6.6 — Localisation dynamique OpenCV (suppression EasyOCR)
+
+| Changement | Description |
+|---|---|
+| 🔍 **Template matching multi-échelle** | EasyOCR et PyTorch (~1 Go) sont **supprimés définitivement**. La relocalisation visuelle utilise désormais `cv2.matchTemplate` (TM_CCOEFF_NORMED) en cascade multi-échelle 0.80×–1.20×, avec recherche locale ±400 px puis plein écran en repli |
+| 🌐 **Compatible RDP / AppliDis / Win32 / Web** | Le matching opère sur les **pixels rendus côté client**, indépendant du protocole de transport (RDP compressé, applications Win32 natives, navigateurs web) |
+| 📌 **Repli absolu garanti** | Si aucun template n'est disponible ou si la confiance est insuffisante, les **coordonnées enregistrées** sont utilisées directement — le rejeu ne bloque jamais |
+| 🎛️ **Nouveau panneau Options** | Case « Localisation dynamique (vision) » + curseur **Confiance** (0.50–1.0, défaut 0.75) ; grisé si OpenCV est absent |
+| 🏗️ **Build plus léger** | Sans EasyOCR/torch, le binaire passe de ~1,5 Go à quelques dizaines de Mo |
+
+---
+
+## Nouveautés v6.5 — Ergonomie & journal de rejeu lisible
+
+| Changement | Description |
+|---|---|
+| ⏹ **REPLAY ↔ STOP** | Le bouton STOP autonome disparaît : pendant un replay, **REPLAY devient ⏹ STOP** (rouge) puis revient à ▶️ REPLAY. La barre de transport tient sur une seule rangée (🔴 REC · ▶️ REPLAY/STOP · 📝 RAPPORT) |
+| 📂 **Scénarios repliables** | La liste des scénarios devient un **accordéon** que l'on ouvre/ferme d'un clic, pour libérer de l'espace dans la colonne de gauche |
+| 📖 **Journal « Replay live »** | Nouvel onglet décrivant **en temps réel et en langage clair** chaque action rejouée (*« Clic sur « Calculatrice » »*, *« Saisie clavier : « 12+34 » »*, *« Déplacement de la souris vers (840, 512) »*), avec statut (✔/⚠/✘) et temps de réponse |
+| 💬 **Bulles d'aide sur les onglets** | Journal / Rapport / Stats long-terme expliquent leur contenu au survol |
 
 ---
 

@@ -60,11 +60,13 @@ except ImportError:
     print("customtkinter requis : pip install customtkinter", file=sys.stderr)
     sys.exit(1)
 
+# v6.6 : EasyOCR supprimé — template matching OpenCV via locator.py
 try:
-    import easyocr as _easyocr
-    _HAS_EASYOCR = True
-except ImportError:
-    _HAS_EASYOCR = False
+    import locator as _locator
+    _HAS_LOCATOR = _locator.is_available()
+except Exception:
+    _locator = None  # type: ignore
+    _HAS_LOCATOR = False
 
 try:
     import chu_logo
@@ -294,7 +296,6 @@ class App(ctk.CTk):
         self._center_window(800, 600)
         self._set_window_icon()
 
-        self._ocr_reader = None
         self._recorder: ActionRecorder | None  = None
         self._replayer: ActionReplayer | None  = None
         self._multi_runner: MultiReplayRunner | None = None
@@ -382,12 +383,10 @@ class App(ctk.CTk):
                 pass
 
         def _load():
-            _step("Initialisation EasyOCR…")
-            if _HAS_EASYOCR:
-                self._ocr_reader = _easyocr.Reader(
-                    ["fr", "en"], gpu=False, verbose=False)
-            _step("EasyOCR prêt ✓", done=True)
-            time.sleep(0.5)
+            _step("Initialisation…")
+            cv_status = "OpenCV ✓" if _HAS_LOCATOR else "OpenCV absent (repli coords)"
+            _step(f"Prêt — localisation dynamique : {cv_status}", done=True)
+            time.sleep(0.4)
             self.after(0, _done)
 
         def _done():
@@ -488,10 +487,10 @@ class App(ctk.CTk):
     # ── Panneau gauche ────────────────────────────────────────────────────────
 
     def _build_left(self, parent):
-        # ── Barre « magnéto » : les 3 fonctions principales en gros boutons ────
+        # ── Barre « magnéto » : REC · REPLAY(→STOP) · RAPPORT ───────────────
         transport = ctk.CTkFrame(parent, fg_color=_BG2, corner_radius=10)
         transport.pack(fill="x", pady=(0, 8))
-        transport.grid_columnconfigure((0, 1), weight=1, uniform="mag")
+        transport.grid_columnconfigure((0, 1, 2), weight=1, uniform="mag")
 
         self._rec_btn = ctk.CTkButton(
             transport, text="🔴\nREC",
@@ -500,7 +499,7 @@ class App(ctk.CTk):
             height=58, corner_radius=10,
             command=self._toggle_record,
         )
-        self._rec_btn.grid(row=0, column=0, sticky="ew", padx=(8, 4), pady=(8, 4))
+        self._rec_btn.grid(row=0, column=0, sticky="ew", padx=(8, 3), pady=8)
         CTkToolTip(self._rec_btn,
                    "Démarrer / arrêter l'enregistrement des actions souris/clavier")
 
@@ -511,20 +510,9 @@ class App(ctk.CTk):
             height=58, corner_radius=10, state="disabled",
             command=self._start_replay,
         )
-        self._replay_btn.grid(row=0, column=1, sticky="ew", padx=(4, 8), pady=(8, 4))
+        self._replay_btn.grid(row=0, column=1, sticky="ew", padx=3, pady=8)
         CTkToolTip(self._replay_btn,
-                   "Lancer le replay du scénario sélectionné")
-
-        self._stop_btn = ctk.CTkButton(
-            transport, text="⏹️\nSTOP",
-            font=("Segoe UI Semibold", 15),
-            fg_color=_RED, hover_color="#B04050", text_color=_ON_ACCENT,
-            height=58, corner_radius=10, state="disabled",
-            command=self._stop_replay,
-        )
-        self._stop_btn.grid(row=1, column=0, sticky="ew", padx=(8, 4), pady=(0, 8))
-        CTkToolTip(self._stop_btn,
-                   "Arrêter le replay en cours après l'action courante")
+                   "Lancer le replay — devient ⏹ STOP pendant l'exécution")
 
         self._report_btn = ctk.CTkButton(
             transport, text="📝\nRAPPORT",
@@ -533,7 +521,7 @@ class App(ctk.CTk):
             height=58, corner_radius=10,
             command=self._export_report_html,
         )
-        self._report_btn.grid(row=1, column=1, sticky="ew", padx=(4, 8), pady=(0, 8))
+        self._report_btn.grid(row=0, column=2, sticky="ew", padx=(3, 8), pady=8)
         CTkToolTip(self._report_btn,
                    "Générer / ouvrir le rapport HTML du dernier replay")
 
@@ -582,15 +570,29 @@ class App(ctk.CTk):
                    "Inscrit tel quel dans le journal officiel\n"
                    "(laisser vide = détection auto du processus actif)")
 
-        # SCÉNARIOS
-        scen_frame = ctk.CTkFrame(scroll, fg_color=_BG2, corner_radius=10)
-        scen_frame.pack(fill="x", pady=(0, 8))
+        # SCÉNARIOS — accordéon (ouvert par défaut)
+        scen_outer = ctk.CTkFrame(scroll, fg_color=_BG2, corner_radius=10)
+        scen_outer.pack(fill="x", pady=(0, 8))
 
-        hdr = ctk.CTkFrame(scen_frame, fg_color="transparent")
-        hdr.pack(fill="x", padx=10, pady=(8, 4))
-        ctk.CTkLabel(hdr, text="📂  Scénarios",
-                     font=_FONT_SM, text_color=_FG2).pack(side="left")
-        rf = ctk.CTkButton(hdr, text="↺", width=26, height=24,
+        self._scen_open = True
+        self._scen_toggle_btn = ctk.CTkButton(
+            scen_outer, text="📂  Scénarios  ▲",
+            font=_FONT_SM, height=36,
+            fg_color=_BG3, hover_color=_BG4, text_color=_ACCENT,
+            anchor="w", corner_radius=8,
+            command=self._toggle_scenarios,
+        )
+        self._scen_toggle_btn.pack(fill="x", padx=8, pady=(6, 0))
+        CTkToolTip(self._scen_toggle_btn,
+                   "Ouvrir / fermer la liste des scénarios enregistrés\n"
+                   "Cliquez pour sélectionner un scénario à rejouer")
+
+        self._scen_panel = ctk.CTkFrame(scen_outer, fg_color="transparent")
+        self._scen_panel.pack(fill="x")
+
+        scen_top = ctk.CTkFrame(self._scen_panel, fg_color="transparent")
+        scen_top.pack(fill="x", padx=10, pady=(4, 0))
+        rf = ctk.CTkButton(scen_top, text="↺", width=26, height=24,
                            fg_color="transparent", hover_color=_BG4,
                            text_color=_FG2, font=("Segoe UI", 12),
                            command=self._refresh_scenario_list)
@@ -598,19 +600,19 @@ class App(ctk.CTk):
         CTkToolTip(rf, "Rafraîchir la liste des scénarios")
 
         self._scen_scroll = ctk.CTkScrollableFrame(
-            scen_frame, fg_color=_BG3, corner_radius=6, height=150,
+            self._scen_panel, fg_color=_BG3, corner_radius=6, height=140,
             scrollbar_button_color=_BG4,
             scrollbar_button_hover_color=_ACCENT,
         )
-        self._scen_scroll.pack(fill="x", padx=8, pady=(0, 6))
+        self._scen_scroll.pack(fill="x", padx=8, pady=(2, 0))
 
         browse_btn = ctk.CTkButton(
-            scen_frame, text="Parcourir…", height=26,
+            self._scen_panel, text="Parcourir…", height=26,
             fg_color=_BG3, hover_color=_BG4, text_color=_FG2,
             font=_FONT_SM, corner_radius=6,
             command=self._browse_scenario,
         )
-        browse_btn.pack(fill="x", padx=10, pady=(0, 8))
+        browse_btn.pack(fill="x", padx=10, pady=(4, 8))
         CTkToolTip(browse_btn, "Ouvrir un fichier scénario JSON depuis un autre dossier")
 
         # OPTIONS
@@ -620,53 +622,59 @@ class App(ctk.CTk):
                      font=_FONT_SM, text_color=_FG2).pack(
             anchor="w", padx=12, pady=(10, 4))
 
-        # Gate visuel OCR — option DÉCOCHÉE par défaut (v6.3)
-        gate_row = ctk.CTkFrame(opt, fg_color="transparent")
-        gate_row.pack(fill="x", padx=10, pady=(4, 2))
-        self._visual_gate_var = tk.BooleanVar(value=False)
-        self._visual_gate_chk = ctk.CTkCheckBox(
-            gate_row,
-            text="Vérifier le contexte visuel (OCR)",
-            variable=self._visual_gate_var,
+        # Localisation dynamique (v6.6) — template matching OpenCV
+        loc_row = ctk.CTkFrame(opt, fg_color="transparent")
+        loc_row.pack(fill="x", padx=10, pady=(4, 2))
+        self._localize_var = tk.BooleanVar(value=False)
+        loc_chk = ctk.CTkCheckBox(
+            loc_row,
+            text="Localisation dynamique (vision)",
+            variable=self._localize_var,
             onvalue=True, offvalue=False,
             font=_FONT_SM, text_color=_FG,
             fg_color=_ACCENT, hover_color=_BLUE_DARK,
             checkmark_color=_ON_ACCENT,
-            command=self._on_visual_gate_toggle,
+            command=self._on_localize_toggle,
         )
-        self._visual_gate_chk.pack(side="left")
-        CTkToolTip(self._visual_gate_chk,
-                   "Si coché : les clics et saisies ne sont rejoués que si le\n"
-                   "contexte visuel correspond (ancrage OCR + seuil ci-dessous).\n"
-                   "Décoché (par défaut) : toutes les actions sont rejouées\n"
-                   "sans vérification — rejeu plus rapide et plus robuste.")
+        loc_chk.pack(side="left")
+        _loc_tip = (
+            "Relocalise chaque clic/saisie par reconnaissance d'image\n"
+            "(template matching OpenCV multi-échelle) avant de rejouer.\n"
+            "Robuste aux déplacements de fenêtre, RDP et changements de\n"
+            "mise en page. Désactivé = coordonnées absolues enregistrées.\n"
+            + ("⚠ OpenCV absent — option inactive." if not _HAS_LOCATOR else
+               "✔ OpenCV disponible.")
+        )
+        CTkToolTip(loc_chk, _loc_tip)
+        if not _HAS_LOCATOR:
+            loc_chk.configure(state="disabled")
 
-        # Seuil OCR — pertinent uniquement quand le gate visuel est coché
-        ocr_row = ctk.CTkFrame(opt, fg_color="transparent")
-        ocr_row.pack(fill="x", padx=10, pady=2)
-        self._ocr_threshold_lbl_l = ctk.CTkLabel(
-            ocr_row, text="Seuil OCR", font=_FONT_SM,
-            text_color=_FG2, width=90)
-        self._ocr_threshold_lbl_l.pack(side="left")
-        self._ocr_threshold_var = tk.DoubleVar(value=0.25)
-        ocr_lbl = ctk.CTkLabel(ocr_row, textvariable=tk.StringVar(),
-                                font=_FONT_SM, text_color=_FG, width=36)
-        ocr_lbl.pack(side="right")
+        # Seuil de confiance image
+        conf_row = ctk.CTkFrame(opt, fg_color="transparent")
+        conf_row.pack(fill="x", padx=10, pady=2)
+        self._conf_lbl_l = ctk.CTkLabel(
+            conf_row, text="Confiance", font=_FONT_SM, text_color=_FG2, width=90)
+        self._conf_lbl_l.pack(side="left")
+        self._ocr_threshold_var = tk.DoubleVar(value=0.75)
+        conf_val_lbl = ctk.CTkLabel(conf_row, textvariable=tk.StringVar(),
+                                     font=_FONT_SM, text_color=_FG, width=36)
+        conf_val_lbl.pack(side="right")
         self._ocr_slider = ctk.CTkSlider(
-            ocr_row, variable=self._ocr_threshold_var,
-            from_=0.0, to=1.0, number_of_steps=20,
+            conf_row, variable=self._ocr_threshold_var,
+            from_=0.50, to=1.0, number_of_steps=20,
             button_color=_ACCENT, button_hover_color=_ACCENT,
             progress_color=_ACCENT, fg_color=_BG3,
-            command=lambda v: ocr_lbl.configure(text=f"{v:.2f}"),
+            command=lambda v: conf_val_lbl.configure(text=f"{v:.2f}"),
         )
         self._ocr_slider.pack(side="left", fill="x", expand=True, padx=6)
-        ocr_lbl.configure(text=f"{self._ocr_threshold_var.get():.2f}")
+        conf_val_lbl.configure(text=f"{self._ocr_threshold_var.get():.2f}")
         CTkToolTip(self._ocr_slider,
-                   "Score minimum de similarité OCR pour valider une action\n"
-                   "0.0 = jamais ignorer · 1.0 = correspondance parfaite requise\n"
-                   "(actif uniquement si « Vérifier le contexte visuel » est coché)")
-        # État initial : gate décoché → slider grisé
-        self._on_visual_gate_toggle()
+                   "Score minimum de similarité visuelle (0.50→1.0)\n"
+                   "pour que la relocalisation template soit acceptée.\n"
+                   "0.75 = valeur recommandée ; réduire si trop de replis.\n"
+                   "(actif uniquement si « Localisation dynamique » est coché)")
+        # État initial
+        self._on_localize_toggle()
 
         # Répétitions
         rep_row = ctk.CTkFrame(opt, fg_color="transparent")
@@ -746,6 +754,15 @@ class App(ctk.CTk):
             auto, text="", font=("Segoe UI", 9), text_color=_ACCENT2)
         self._auto_status_lbl.pack(anchor="w", padx=12, pady=(0, 8))
 
+    def _toggle_scenarios(self):
+        self._scen_open = not self._scen_open
+        if self._scen_open:
+            self._scen_panel.pack(fill="x")
+            self._scen_toggle_btn.configure(text="📂  Scénarios  ▲")
+        else:
+            self._scen_panel.pack_forget()
+            self._scen_toggle_btn.configure(text="📂  Scénarios  ▼")
+
     # ── Panneau droit ─────────────────────────────────────────────────────────
 
     def _build_right(self, parent):
@@ -789,6 +806,24 @@ class App(ctk.CTk):
         self._tabs.add("Stats long-terme")
         self._tabs._segmented_button.configure(font=_FONT_SM)
 
+        # Bulles d'aide contextuelles sur les trois onglets principaux
+        self._attach_tab_tooltips(self._tabs, {
+            "Journal":
+                "Journal d'exécution en temps réel.\n"
+                "• Journal officiel : une ligne par exécution complète\n"
+                "• Log debug : détail action-par-action (OCR, timing, erreurs)\n"
+                "• Replay live : description « lisible » de chaque action rejouée",
+            "Rapport":
+                "Rapport du dernier replay : tableau action-par-action\n"
+                "(type, cible, vérif. clavier, score OCR, temps de réponse,\n"
+                "statut). Exports JSON / HTML + accès au Débug dev.",
+            "Stats long-terme":
+                "Statistiques cumulées en base SQLite :\n"
+                "• Historique des runs (durée, OK / ignorées / erreurs)\n"
+                "• Stats par bouton (temps moyen, taux de réussite)\n"
+                "Export CSV et dashboard web disponibles.",
+        })
+
         # Rafraîchit les stats lors du changement d'onglet
         try:
             self._tabs._segmented_button.configure(
@@ -799,6 +834,18 @@ class App(ctk.CTk):
         self._build_journal_tab(self._tabs.tab("Journal"))
         self._build_report_tab(self._tabs.tab("Rapport"))
         self._build_stats_tab(self._tabs.tab("Stats long-terme"))
+
+    @staticmethod
+    def _attach_tab_tooltips(tabview, mapping: dict):
+        """Attache une bulle d'aide à chaque bouton d'onglet d'un CTkTabview."""
+        try:
+            buttons = tabview._segmented_button._buttons_dict
+            for name, text in mapping.items():
+                btn = buttons.get(name)
+                if btn is not None:
+                    CTkToolTip(btn, text)
+        except Exception:
+            pass
 
     def _build_journal_tab(self, parent):
         # Sous-onglets : Officiel / Debug
@@ -816,6 +863,7 @@ class App(ctk.CTk):
         self._log_tabs.pack(fill="both", expand=True, padx=4, pady=4)
         self._log_tabs.add("Journal officiel")
         self._log_tabs.add("Log debug")
+        self._log_tabs.add("Replay live")
         self._log_tabs._segmented_button.configure(font=_FONT_SM)
 
         # Journal officiel
@@ -863,11 +911,26 @@ class App(ctk.CTk):
                 kw["font"] = ("Consolas", 9, "bold")
             self._debug_log_box._textbox.tag_configure(tag, **kw)
 
+        # Replay live — descriptions humainement lisibles en temps réel
+        live_tab = self._log_tabs.tab("Replay live")
+        ctk.CTkLabel(live_tab,
+                     text="Actions rejouées en temps réel — description lisible",
+                     font=("Segoe UI", 9), text_color=_FG2).pack(anchor="w", pady=(0, 4))
+        self._replay_live_box = ctk.CTkTextbox(
+            live_tab, font=("Segoe UI", 10),
+            fg_color=_BG3, text_color=_FG,
+            state="disabled", corner_radius=6,
+        )
+        self._replay_live_box.pack(fill="both", expand=True)
+        for tag, fg in [("ok", _GREEN), ("warn", _YELLOW), ("error", _RED),
+                        ("info", _FG2), ("heading", _ACCENT)]:
+            self._replay_live_box._textbox.tag_configure(tag, foreground=fg)
+
         # Charger les entrées existantes du journal officiel
         self.after(500, self._load_official_log)
 
     def _build_report_tab(self, parent):
-        cols = ("#", "Type", "Cible", "OCR", "Visuel", "Réponse (ms)", "Statut")
+        cols = ("#", "Type", "Cible", "Localisation", "Clavier", "Réponse (ms)", "Statut")
         frame = ctk.CTkFrame(parent, fg_color=_BG3, corner_radius=8)
         frame.pack(fill="both", expand=True, padx=4, pady=4)
 
@@ -891,13 +954,13 @@ class App(ctk.CTk):
                                    style="V4.Treeview", yscrollcommand=sb.set)
         for col in cols:
             self._tree.heading(col, text=col)
-        self._tree.column("#",            width=40,  stretch=False)
-        self._tree.column("Type",         width=100, stretch=False)
-        self._tree.column("Cible",        width=180, stretch=True)
-        self._tree.column("OCR",          width=60,  stretch=False)
-        self._tree.column("Visuel",       width=60,  stretch=False)
-        self._tree.column("Réponse (ms)", width=100, stretch=False)
-        self._tree.column("Statut",       width=150, stretch=True)
+        self._tree.column("#",              width=40,  stretch=False)
+        self._tree.column("Type",           width=100, stretch=False)
+        self._tree.column("Cible",          width=160, stretch=True)
+        self._tree.column("Localisation",   width=90,  stretch=False)
+        self._tree.column("Clavier",        width=70,  stretch=False)
+        self._tree.column("Réponse (ms)",   width=100, stretch=False)
+        self._tree.column("Statut",         width=130, stretch=True)
         sb.config(command=self._tree.yview)
         self._tree.pack(fill="both", expand=True)
 
@@ -1187,8 +1250,7 @@ class App(ctk.CTk):
         if self._recorder is None:
             name = self._scenario_name_entry.get().strip() or ""
             target_app = self._target_app_entry.get().strip()
-            self._recorder = ActionRecorder(scenario_name=name, target_app=target_app,
-                                             reader=self._ocr_reader)
+            self._recorder = ActionRecorder(scenario_name=name, target_app=target_app)
             self._recorder.start()
             self._rec_btn.configure(text="⏹️\nSTOP REC",
                                      fg_color="#8A2F3A", hover_color="#702430")
@@ -1210,23 +1272,14 @@ class App(ctk.CTk):
 
     # ── Replay ────────────────────────────────────────────────────────────────
 
-    def _on_visual_gate_toggle(self):
-        """Active/grise le seuil OCR selon l'état de la case « contexte visuel »."""
-        # Binaire léger sans EasyOCR : la vérification visuelle est indisponible.
-        if self._visual_gate_var.get() and not _HAS_EASYOCR:
-            messagebox.showinfo(
-                "OCR non disponible",
-                "Cette version n'embarque pas la reconnaissance visuelle (EasyOCR).\n\n"
-                "Le rejeu s'effectue sans vérification du contexte visuel.\n"
-                "Pour activer l'ancrage OCR, utilisez la version complète ou "
-                "installez WinGhost depuis les sources (pip install easyocr).")
-            self._visual_gate_var.set(False)
-        enabled = bool(self._visual_gate_var.get())
+    def _on_localize_toggle(self):
+        """Active/grise le seuil de confiance selon l'état de la case localisation."""
+        enabled = bool(self._localize_var.get()) and _HAS_LOCATOR
         state = "normal" if enabled else "disabled"
         color = _FG2 if enabled else _BG4
         try:
             self._ocr_slider.configure(state=state)
-            self._ocr_threshold_lbl_l.configure(text_color=color)
+            self._conf_lbl_l.configure(text_color=color)
         except Exception:
             pass
 
@@ -1242,8 +1295,11 @@ class App(ctk.CTk):
         self._results.clear()
         self._report_json_path = self._report_html_path = None
         self._clear_tree()
-        self._replay_btn.configure(state="disabled")
-        self._stop_btn.configure(state="normal")
+        self._clear_replay_live()
+        self._replay_btn.configure(
+            text="⏹\nSTOP", fg_color=_RED, hover_color="#B04050",
+            command=self._stop_replay, state="normal",
+        )
         self._progress_bar.set(0)
         self._current_run_index  = 0
         self._total_runs_planned = n_runs
@@ -1252,21 +1308,20 @@ class App(ctk.CTk):
         self._run_lbl.configure(text=f"Run 1/{n_runs}" if n_runs > 1 else "")
         self._status_var.set("Replay en cours…")
         self._tabs.set("Journal")
-        self._log_tabs.set("Journal officiel")
+        self._log_tabs.set("Replay live")
 
         self._log_debug(
             f"▶ Replay × {n_runs} — scénario : {scenario_name}", "heading")
         if n_runs > 1:
             self._log_debug(f"  Intervalle : {interval}s", "info")
 
-        visual_gate = bool(self._visual_gate_var.get())
+        localize = bool(self._localize_var.get()) and _HAS_LOCATOR
 
         if n_runs == 1:
             self._replayer = ActionReplayer(
-                ocr_similarity_min=self._ocr_threshold_var.get(),
+                localize=localize,
+                locator_confidence=self._ocr_threshold_var.get(),
                 on_progress=self._on_action_progress,
-                reader=self._ocr_reader,
-                visual_gate=visual_gate,
             )
             session = self._replayer.load_session(self._session_path)
             self._total_actions = len(session.get("actions", []))
@@ -1278,8 +1333,7 @@ class App(ctk.CTk):
                 on_run_start=self._on_multi_run_start,
                 on_run_done=self._on_multi_run_done,
                 on_progress=self._on_action_progress,
-                visual_gate=visual_gate,
-                reader=self._ocr_reader,
+                localize=localize,
             )
             with open(self._session_path, encoding="utf-8") as f:
                 _s = json.load(f)
@@ -1325,12 +1379,87 @@ class App(ctk.CTk):
             self._multi_runner.stop()
         self._log_debug("■ Replay interrompu.", "warn")
 
+    def _restore_replay_btn(self):
+        """Rétablit le bouton REPLAY après un replay/automatique (sortie de l'état STOP)."""
+        self._replay_btn.configure(
+            text="▶️\nREPLAY",
+            fg_color=_ACCENT, hover_color=_BLUE_DARK,
+            command=self._start_replay,
+            state="normal" if self._session_path else "disabled",
+        )
+
+    def _clear_replay_live(self):
+        """Vide le journal « Replay live » (descriptions lisibles)."""
+        try:
+            box = self._replay_live_box._textbox
+            box.configure(state="normal")
+            box.delete("1.0", "end")
+            box.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _log_replay_live(self, result: "ActionResult", tag: str):
+        """Écrit une description « humainement lisible » de l'action rejouée."""
+        ts   = datetime.datetime.now().strftime("%H:%M:%S")
+        desc = self._human_description(result)
+        icon    = "⚠" if result.skipped else ("✘" if result.error else "✔")
+        rt      = f"  ({result.response_time_ms:.0f} ms)" if result.response_time_ms else ""
+        loc_m   = getattr(result, "locator_method", "absolute")
+        loc_c   = getattr(result, "locator_conf", 0.0) or 0.0
+        loc_tag = f"  [🔍 {loc_c:.2f}]" if loc_m == "template" else ""
+        line    = f"[{ts}] {icon} {desc}{rt}{loc_tag}\n"
+        try:
+            box = self._replay_live_box._textbox
+            box.configure(state="normal")
+            box.insert("end", line, tag)
+            box.see("end")
+            box.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _human_description(self, result: "ActionResult") -> str:
+        """Traduit une action rejouée en phrase compréhensible par un humain."""
+        atype = result.action_type
+        label = result.label or ""
+        x, y  = result.x, result.y
+        app   = result.app_name or ""
+        where = f" dans « {app} »" if app else ""
+        at    = f" en ({x}, {y})" if x is not None and y is not None else ""
+        # cible : libellé détecté sinon coordonnées
+        target = f" sur « {label} »" if label and label != atype else at
+
+        if atype == "click":
+            return f"Clic{target}{where}"
+        if atype == "double_click":
+            return f"Double-clic{target}{where}"
+        if atype == "right_click":
+            return f"Clic droit{target}{where}"
+        if atype == "middle_click":
+            return f"Clic molette{at}{where}"
+        if atype == "scroll":
+            return f"Défilement molette{at}{where}"
+        if atype == "drag":
+            x2, y2 = getattr(result, "x2", None), getattr(result, "y2", None)
+            dest = f" vers ({x2}, {y2})" if x2 is not None and y2 is not None else ""
+            return f"Glisser-déposer depuis{at}{dest}{where}"
+        if atype == "type":
+            typed = getattr(result, "typed_text", None) or label
+            typed = typed or ""
+            short = (typed[:40] + "…") if len(typed) > 40 else typed
+            return f"Saisie clavier : « {short} »{where}"
+        if atype == "key":
+            return f"Touche « {label} »{where}"
+        if atype == "move":
+            return f"Déplacement de la souris vers ({x}, {y})"
+        return f"Action « {atype} »{target}{where}"
+
     def _on_multi_run_start(self, idx: int, total: int):
         self._current_run_index = idx
         self.after(0, self._run_lbl.configure, {"text": f"Run {idx}/{total}"})
         self.after(0, self._log_debug, f"═══ Run {idx}/{total} ═══", "run")
         self.after(0, self._progress_bar.set, 0)
         self.after(0, self._clear_tree)
+        self.after(0, self._clear_replay_live)
 
     def _on_multi_run_done(self, idx: int, total: int, results: list[ActionResult]):
         ok    = sum(1 for r in results if r.status == "ok")
@@ -1361,6 +1490,7 @@ class App(ctk.CTk):
         label_part = f"  [{label}]" if label else ""
         self._log_debug(
             f"[{result.index:>3}] {result.action_type:<14}{label_part:<22}  {status}", tag)
+        self._log_replay_live(result, tag)
         self._add_tree_row(result)
 
     def _on_replay_done(self, results: list[ActionResult],
@@ -1401,22 +1531,26 @@ class App(ctk.CTk):
             self._show_failure_popup(scen, failing)
 
     def _on_replay_finished(self):
-        self._replay_btn.configure(state="normal")
-        self._stop_btn.configure(state="disabled")
+        self._restore_replay_btn()
         self._progress_bar.set(1)
         self._run_lbl.configure(text="")
 
     # ── Rapport ───────────────────────────────────────────────────────────────
 
     def _add_tree_row(self, r: ActionResult):
-        ocr  = f"{r.ocr_match:.2f}" if r.ocr_match is not None else "—"
-        vis  = "✔" if r.visual_ok else ("✘" if r.visual_ok is False else "—")
-        resp = f"{r.response_time_ms:.0f}" if r.response_time_ms is not None else "—"
+        loc_m   = getattr(r, "locator_method", "absolute")
+        loc_c   = getattr(r, "locator_conf", 0.0) or 0.0
+        loc_icon = "🔍" if loc_m == "template" else "📌"
+        loc     = f"{loc_icon} {loc_c:.2f}" if loc_c > 0 else loc_icon
+        kb_sent = getattr(r, "keys_sent", None)
+        kb_tot  = getattr(r, "keys_total", None)
+        clav    = f"{'✔' if kb_sent == kb_tot else '⚠'} {kb_sent}/{kb_tot}" if kb_tot else "—"
+        resp    = f"{r.response_time_ms:.0f}" if r.response_time_ms is not None else "—"
         tag, status = (("warn", "IGNORÉ") if r.skipped
                        else (("error", r.error[:40]) if r.error else ("ok", "OK")))
         iid = self._tree.insert("", "end",
                                  values=(r.index, r.action_type,
-                                         r.label or "—", ocr, vis, resp, status))
+                                         r.label or "—", loc, clav, resp, status))
         self._tree.item(iid, tags=(tag,))
 
     def _clear_tree(self):
@@ -1818,8 +1952,7 @@ class App(ctk.CTk):
             on_cycle_done=self._on_auto_cycle_done,
             on_progress=self._on_action_progress,
             on_wait=self._on_auto_wait,
-            visual_gate=bool(self._visual_gate_var.get()),
-            reader=self._ocr_reader,
+            visual_gate=bool(self._localize_var.get()) and _HAS_LOCATOR,
         )
         self._auto_running = True
         self._auto_btn.configure(text="  ■  Arrêter l'automatique",
@@ -1851,8 +1984,7 @@ class App(ctk.CTk):
         self._auto_running = False
         self._auto_btn.configure(text="  ⏱  Démarrer l'automatique",
                                  fg_color=_ACCENT2, hover_color=_GREEN_DARK)
-        self._replay_btn.configure(
-            state="normal" if self._session_path else "disabled")
+        self._restore_replay_btn()
         self._rec_btn.configure(state="normal")
         self._auto_status_lbl.configure(text="")
         self._status_var.set("Mode automatique arrêté.")
