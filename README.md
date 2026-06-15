@@ -1,11 +1,22 @@
-# WinGhost RPA v6.4 — CHU Toulouse
+# WinGhost RPA v6.5 — CHU Toulouse
 
 > Enregistreur / Rejoueur RPA Windows **aux couleurs du CHU de Toulouse**, avec ancrage visuel OCR **optionnel**, capture de tous les inputs souris (clics, molette, glisser), enregistrement des mouvements, splash screen de démarrage, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
 
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-6.4.3-green)
+![Version](https://img.shields.io/badge/version-6.5.0-green)
+
+---
+
+## Nouveautés v6.5 — Ergonomie & journal de rejeu lisible
+
+| Changement | Description |
+|---|---|
+| ⏹ **REPLAY ↔ STOP** | Le bouton STOP autonome disparaît : pendant un replay, **REPLAY devient ⏹ STOP** (rouge) puis revient à ▶️ REPLAY. La barre de transport tient sur une seule rangée (🔴 REC · ▶️ REPLAY/STOP · 📝 RAPPORT) |
+| 📂 **Scénarios repliables** | La liste des scénarios devient un **accordéon** que l'on ouvre/ferme d'un clic, pour libérer de l'espace dans la colonne de gauche |
+| 📖 **Journal « Replay live »** | Nouvel onglet décrivant **en temps réel et en langage clair** chaque action rejouée (*« Clic sur « Calculatrice » »*, *« Saisie clavier : « 12+34 » »*, *« Déplacement de la souris vers (840, 512) »*), avec statut (✔/⚠/✘) et temps de réponse |
+| 💬 **Bulles d'aide sur les onglets** | Journal / Rapport / Stats long-terme expliquent leur contenu au survol |
 
 ---
 

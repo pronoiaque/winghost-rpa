@@ -130,6 +130,7 @@ class ActionResult:
         # v6.4 : vérification de la saisie clavier (caractères réellement émis)
         self.keys_sent        = None   # int | None
         self.keys_total       = None   # int | None
+        self.typed_text       = None   # str | None — texte saisi (action "type")
 
     @property
     def response_time_ms(self) -> Optional[float]:
@@ -162,6 +163,7 @@ class ActionResult:
             "response_time_ms": self.response_time_ms,
             "keys_sent":        self.keys_sent,
             "keys_total":       self.keys_total,
+            "typed_text":       self.typed_text,
             "screenshot_b64":   self.screenshot_b64,
         }
 
@@ -753,6 +755,8 @@ td.status{{font-weight:700}}
                     pass
         elif atype == "type":
             text = raw.get("text", "")
+            if result is not None:
+                result.typed_text = text
             # Traçage AVANT toute action : où part la frappe ?
             fg_before = winput.foreground_info()
             trace_log.log("REPLAY ✎ type texte=%r — premier plan AVANT clic : "

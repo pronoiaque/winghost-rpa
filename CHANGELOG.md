@@ -5,6 +5,32 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [6.5.0] — 2026-06-15
+
+### Modifié — Ergonomie « magnéto » & journal de rejeu lisible
+
+#### 🎛️ Barre de transport simplifiée (3 boutons)
+- Le bouton **STOP autonome est supprimé** : pendant un replay, le bouton **REPLAY se transforme lui-même en ⏹ STOP** (rouge), puis revient à ▶️ REPLAY une fois l'exécution terminée ou interrompue
+- La barre tient désormais sur **une seule rangée** : 🔴 REC · ▶️ REPLAY/STOP · 📝 RAPPORT
+
+#### 📂 Bloc Scénarios repliable
+- La liste des scénarios devient un **accordéon** (bouton-titre « 📂 Scénarios ▲/▼ » dans le même style que la barre de transport) que l'on **ouvre / ferme** d'un clic, pour gagner de la place dans la colonne de gauche
+
+#### 📖 Journal « Replay live » humainement lisible
+- Nouvel onglet **« Replay live »** dans le Journal : pendant le rejeu, chaque action est décrite **en temps réel et en langage clair**, par ex. :
+  - *« Clic sur « Calculatrice » dans « calc » »*
+  - *« Saisie clavier : « 12+34 » »*
+  - *« Déplacement de la souris vers (840, 512) »*
+  - *« Touche « enter » »*
+- Chaque ligne porte son **statut** (✔ / ⚠ ignorée / ✘ erreur) et le **temps de réponse** mesuré
+- Le replay bascule automatiquement sur cet onglet au démarrage
+- `ActionResult.typed_text` conserve le texte exact saisi pour produire ces descriptions
+
+#### 💬 Bulles d'aide contextuelles sur les onglets
+- Les trois onglets principaux (**Journal**, **Rapport**, **Stats long-terme**) disposent désormais d'une **bulle d'aide** expliquant leur contenu au survol
+
+---
+
 ## [6.4.3] — 2026-06-15
 
 ### Corrigé — Saisie au pavé numérique & régression de focus (diagnostic par trace réelle)
