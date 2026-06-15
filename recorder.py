@@ -450,6 +450,18 @@ class ActionRecorder:
         except AttributeError:
             pass
 
+        # Pavé numérique : pynput ne fournit pas de `char` (les touches arrivent
+        # comme « <97> »…). On les convertit en caractère et on les bufferise
+        # comme une saisie texte normale (sinon les chiffres sont perdus).
+        vk = getattr(key, "vk", None)
+        np_char = winput.vk_to_char(vk) if vk is not None else None
+        if np_char is not None:
+            self._typed_buffer += np_char
+            self._last_key_time = t
+            trace_log.log("REC   pavé num vk=%s → %r (tampon=%r)",
+                          vk, np_char, self._typed_buffer)
+            return
+
         # Touche spéciale (Enter, Tab, Escape, F-keys…)
         self._flush_typed_buffer()
         key_name = str(key).replace("Key.", "")

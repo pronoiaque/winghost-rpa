@@ -4,7 +4,7 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "winghost-rpa"
-version = "6.4.2"
+version = "6.4.3"
 description = "Enregistreur / rejoueur RPA Windows (habillage CHU Toulouse) avec ancrage visuel OCR optionnel, tous les inputs souris, splash screen, scénarios nommés, log officiel CSV, mode automatique (systray), dashboard web et interface CustomTkinter"
 readme = "README.md"
 license = { file = "LICENSE" }

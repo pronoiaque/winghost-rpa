@@ -202,6 +202,25 @@ def now() -> float:
     return time.perf_counter()
 
 
+# ─── Pavé numérique : codes touches virtuelles (VK) → caractère ───────────────
+# pynput livre les touches du pavé numérique sans `char` ; elles arrivent sous la
+# forme « <97> » (VK_NUMPAD1=97 … VK_NUMPAD9=105, VK_NUMPAD0=96, + opérateurs).
+# Sans cette table, les chiffres saisis au pavé numérique sont perdus.
+_VK_TO_CHAR = {
+    96: "0", 97: "1", 98: "2", 99: "3", 100: "4",
+    101: "5", 102: "6", 103: "7", 104: "8", 105: "9",
+    106: "*", 107: "+", 109: "-", 110: ".", 111: "/",
+}
+
+
+def vk_to_char(vk) -> str | None:
+    """Caractère correspondant à un code VK de pavé numérique, ou None."""
+    try:
+        return _VK_TO_CHAR.get(int(vk))
+    except (TypeError, ValueError):
+        return None
+
+
 # ─── Focus / fenêtre au premier plan (diagnostic + correctif rejeu) ───────────
 
 def foreground_info() -> dict:
@@ -268,6 +287,15 @@ def focus_at(x: int, y: int) -> bool:
         # Remonter à la fenêtre racine (top-level)
         root = win32gui.GetAncestor(pt_hwnd, 2)  # GA_ROOT = 2
         target = root or pt_hwnd
+        # NE PAS forcer le focus vers le bureau / la barre des tâches : cela
+        # volerait le focus à l'application réellement visée (régression v6.4.2
+        # où le « calc » partait vers explorer.exe au lieu de la recherche).
+        try:
+            cls = win32gui.GetClassName(target)
+        except Exception:
+            cls = ""
+        if cls in _SHELL_WINDOW_CLASSES:
+            return False
         try:
             win32gui.SetForegroundWindow(target)
         except Exception:
@@ -279,6 +307,13 @@ def focus_at(x: int, y: int) -> bool:
         return True
     except Exception:
         return False
+
+
+# Fenêtres « shell » (bureau, barre des tâches) à NE jamais cibler pour le focus.
+_SHELL_WINDOW_CLASSES = {
+    "WorkerW", "Progman", "Shell_TrayWnd", "Shell_SecondaryTrayWnd",
+    "ApplicationManager_DesktopShellWindow", "ForegroundStaging",
+}
 
 
 # ─── 3. Saisie clavier fiable (Unicode) ───────────────────────────────────────
@@ -400,6 +435,30 @@ def press_key(name: str) -> bool:
     noms enregistrés), repli pyautogui sinon.
     """
     if not name:
+        return False
+
+    # Touche « <NN> » (pavé numérique non mappé par pynput) → injecter le
+    # caractère correspondant. Corrige les scénarios où les chiffres du pavé
+    # numérique avaient été enregistrés sous la forme <96>…<111>.
+    if name.startswith("<") and name.endswith(">"):
+        ch = vk_to_char(name[1:-1])
+        if ch:
+            n_ok, _n, _e = (_sendinput_unicode_char(ch) if _HAS_SENDINPUT
+                            else (False, 0, 0))
+            if n_ok:
+                return True
+            if _HAS_PYNPUT:
+                try:
+                    _kb.type(ch)
+                    return True
+                except Exception:
+                    pass
+            if pyautogui is not None:
+                try:
+                    pyautogui.write(ch)
+                    return True
+                except Exception:
+                    pass
         return False
 
     if _HAS_PYNPUT:

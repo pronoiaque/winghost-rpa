@@ -5,6 +5,28 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [6.4.3] — 2026-06-15
+
+### Corrigé — Saisie au pavé numérique & régression de focus (diagnostic par trace réelle)
+
+Analyse du `winghost_trace.log` d'un scénario « ouvrir la calculatrice + additions » :
+
+#### 🔢 Chiffres du pavé numérique perdus (cause des additions non rejouées)
+- **Constat** : `calc` était bien capturé, mais les chiffres tapés au **pavé numérique** arrivaient sous la forme `touche spéciale='<97>'`, `'<98>'`… (codes `VK_NUMPAD1=97` … `VK_NUMPAD9=105`). pynput ne leur associe aucun caractère → ils étaient enregistrés comme touches au nom `<97>` que le rejeu ne savait pas reproduire → **chiffres perdus dès l'enregistrement**
+- **Correctif** :
+  - `winput.vk_to_char()` : table `VK` pavé numérique → caractère (`96–105` → `0–9`, `106 *`, `107 +`, `109 -`, `110 .`, `111 /`)
+  - **Enregistrement** : les touches du pavé numérique sont désormais bufferisées comme une saisie texte normale
+  - **Rejeu rétro-compatible** : `winput.press_key()` interprète les touches `<NN>` des anciens scénarios et injecte le bon caractère
+
+#### 🎯 Régression de focus corrigée (v6.4.2)
+- **Constat** : `focus_at()` forçait le focus vers la fenêtre sous le curseur, qui pouvait être le **bureau / la barre des tâches** (`explorer.exe`) → la frappe partait dans le vide au lieu de l'application visée
+- **Correctif** : `focus_at()` **ignore désormais les fenêtres « shell »** (`WorkerW`, `Progman`, `Shell_TrayWnd`, `ApplicationManager_DesktopShellWindow`…) et ne vole plus le focus à l'application réellement ciblée
+
+#### 🎛️ Interface
+- Le bouton **REC est maintenant rouge** (🔴) au repos ; il devient « ⏹️ STOP REC » en rouge foncé pendant l'enregistrement
+
+---
+
 ## [6.4.2] — 2026-06-15
 
 ### Ajouté — Diagnostic clavier multi-contextuel & ergonomie

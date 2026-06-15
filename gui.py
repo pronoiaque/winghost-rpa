@@ -496,7 +496,7 @@ class App(ctk.CTk):
         self._rec_btn = ctk.CTkButton(
             transport, text="🔴\nREC",
             font=("Segoe UI Semibold", 15),
-            fg_color=_GREEN, hover_color="#35A07E", text_color=_ON_ACCENT,
+            fg_color=_RED, hover_color="#B04050", text_color=_ON_ACCENT,
             height=58, corner_radius=10,
             command=self._toggle_record,
         )
@@ -1190,8 +1190,8 @@ class App(ctk.CTk):
             self._recorder = ActionRecorder(scenario_name=name, target_app=target_app,
                                              reader=self._ocr_reader)
             self._recorder.start()
-            self._rec_btn.configure(text="⏺️\nSTOP REC",
-                                     fg_color=_RED, hover_color="#B04050")
+            self._rec_btn.configure(text="⏹️\nSTOP REC",
+                                     fg_color="#8A2F3A", hover_color="#702430")
             self._replay_btn.configure(state="disabled")
             self._status_var.set("⬤ Enregistrement…")
             self._log_debug("⬤ Enregistrement démarré.", "heading")
@@ -1200,7 +1200,7 @@ class App(ctk.CTk):
             path = self._recorder.stop()
             self._recorder = None
             self._rec_btn.configure(text="🔴\nREC",
-                                     fg_color=_GREEN, hover_color="#35A07E")
+                                     fg_color=_RED, hover_color="#B04050")
             name = self._read_scenario_display_name(path)
             self._log_debug(f"■ Scénario sauvegardé : {path.name}", "ok")
             self._log_official(f"■  Scénario enregistré : {name}", "ok")
