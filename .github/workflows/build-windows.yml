@@ -39,15 +39,7 @@ jobs:
           pip install -r requirements-build.txt
 
       - name: Vérifier la cohérence des versions (version.py == pyproject.toml)
-        shell: pwsh
-        run: |
-          $appVer = python -c "from version import __version__ as v; print(v)"
-          $pyproj = python -c "import re; print(re.search(r'version\s*=\s*\"([^\"]+)\"', open('pyproject.toml', encoding='utf-8').read()).group(1))"
-          Write-Host "version.py = $appVer ; pyproject.toml = $pyproj"
-          if ($appVer -ne $pyproj) {
-            Write-Error "Incohérence de version : version.py ($appVer) != pyproject.toml ($pyproj)"
-            exit 1
-          }
+        run: python tools/check_version.py
 
       - name: Build single-file binary
         run: pyinstaller --noconfirm --clean winghost.spec

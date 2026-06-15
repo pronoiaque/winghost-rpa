@@ -13,6 +13,11 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 - **Diagnostic « Intégrité proc. » (Débug dev)** : renvoyait « token inaccessible » à cause de signatures `ctypes` manquantes (pseudo-handle 64 bits tronqué). Signatures `argtypes`/`restype` explicites ajoutées (`OpenProcessToken`, `GetTokenInformation`, `GetSidSubAuthority*`) + handle de token désormais fermé proprement. Le niveau d'intégrité (Medium/High/System) est maintenant correctement rapporté — essentiel pour détecter un blocage **UIPI** (cible élevée)
 - **Versions des bibliothèques (Débug dev)** : `pynput=?` corrigé via repli `importlib.metadata` (pynput n'expose pas `__version__`)
 
+### Automatisation (build & versions)
+- **`version.py`** : source UNIQUE de version ; l'IHM (titre/splash/bandeau) et le débug la lisent → plus aucun risque de numéro de version en dur déphasé
+- **Build automatique** : le workflow se déclenche désormais à chaque **push sur `main`** (artefact `WinGhost.exe` téléchargeable), en plus du déclenchement manuel et des tags `v*`
+- **Garde-fou CI** : `tools/check_version.py` vérifie `version.py == pyproject.toml` avant le build (échec immédiat en cas de décalage)
+
 ### Validé (rapport de débug poste CHU)
 - Disposition **AZERTY** confirmée comme cause racine ; **`SendInput OK`** ; auto-test de frappe **22/22 caractères identiques** (accents `é è à ç ù €` inclus) → le correctif clavier v6.4 fonctionne sur poste français
 
