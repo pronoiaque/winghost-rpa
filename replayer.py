@@ -51,19 +51,28 @@ from typing import Callable, Optional
 
 import numpy as np
 import pyautogui
-import easyocr
 from PIL import Image
 
 from recorder import screenshot_region, derive_label
+from paths import data_dir
 import stats_db
 import official_log
 
+# EasyOCR est OPTIONNEL (v6.3+) : importé paresseusement uniquement quand le
+# gate visuel est activé. Absent, le replay fonctionne sans vérification OCR.
+try:
+    import easyocr
+    _HAS_EASYOCR = True
+except Exception:
+    easyocr = None
+    _HAS_EASYOCR = False
+
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-SESSIONS_DIR           = Path("sessions")
-SCENARIOS_DIR          = Path("scenarios")
-REPORTS_DIR            = Path("reports")
-REPORTS_DIR.mkdir(exist_ok=True)
+SESSIONS_DIR           = data_dir() / "sessions"
+SCENARIOS_DIR          = data_dir() / "scenarios"
+REPORTS_DIR            = data_dir() / "reports"
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 OCR_LANGUAGES          = ["fr", "en"]
 OCR_SIMILARITY_MIN     = 0.25   # v6.1 : abaissé (était 0.40) pour réduire les
@@ -163,16 +172,21 @@ class ActionReplayer:
         self._reader = reader
 
         # L'OCR n'est nécessaire que si le gate visuel est actif. On n'initialise
-        # EasyOCR (coûteux) que dans ce cas et seulement si aucun lecteur partagé
-        # n'a été fourni.
+        # EasyOCR (coûteux, optionnel) que dans ce cas et seulement si aucun
+        # lecteur partagé n'a été fourni. S'il est indisponible (binaire léger
+        # sans PyTorch), on désactive proprement le gate.
         if not visual_gate:
             log.info("Gate visuel OCR désactivé — rejeu sans vérification.")
         elif reader is not None:
             log.info("Utilisation du lecteur OCR partagé.")
-        else:
+        elif _HAS_EASYOCR:
             log.info("Initialisation EasyOCR…")
             self._reader = easyocr.Reader(OCR_LANGUAGES, gpu=False, verbose=False)
             log.info("EasyOCR prêt.")
+        else:
+            log.warning("EasyOCR indisponible — gate visuel désactivé, "
+                        "rejeu de toutes les actions sans vérification.")
+            self.visual_gate = False
 
     # ── API publique ──────────────────────────────────────────────────────────
 

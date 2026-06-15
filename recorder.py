@@ -34,18 +34,29 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 
 import pyautogui
-import easyocr
 from PIL import Image
 import numpy as np
 from pynput import mouse, keyboard
 
+from paths import data_dir
+
+# EasyOCR est OPTIONNEL (v6.3+) : il tire PyTorch (lourd) et n'est requis que
+# pour l'ancrage visuel. On l'importe paresseusement ; absent, l'enregistrement
+# fonctionne sans label OCR (les screenshots restent capturés).
+try:
+    import easyocr
+    _HAS_EASYOCR = True
+except Exception:
+    easyocr = None
+    _HAS_EASYOCR = False
+
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-SESSIONS_DIR = Path("sessions")
-SESSIONS_DIR.mkdir(exist_ok=True)
+SESSIONS_DIR = data_dir() / "sessions"
+SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-SCENARIOS_DIR = Path("scenarios")
-SCENARIOS_DIR.mkdir(exist_ok=True)
+SCENARIOS_DIR = data_dir() / "scenarios"
+SCENARIOS_DIR.mkdir(parents=True, exist_ok=True)
 
 SCREENSHOT_PADDING = 160         # px autour du clic pour la capture visuelle (wider)
 OCR_LANGUAGES      = ["fr", "en"]
@@ -236,10 +247,14 @@ class ActionRecorder:
         if reader is not None:
             log.info("Utilisation du lecteur OCR partagé.")
             self._reader = reader
-        else:
+        elif _HAS_EASYOCR:
             log.info("Initialisation EasyOCR (langues : %s)…", OCR_LANGUAGES)
             self._reader = easyocr.Reader(OCR_LANGUAGES, gpu=False, verbose=False)
             log.info("EasyOCR prêt.")
+        else:
+            log.warning("EasyOCR indisponible — enregistrement sans label OCR "
+                        "(les screenshots restent capturés).")
+            self._reader = None
 
     # ── Contrôle ──────────────────────────────────────────────────────────────
 
@@ -478,10 +493,13 @@ class ActionRecorder:
         """Screenshot de la région autour du point, puis OCR + label."""
         try:
             img, region = screenshot_region(x, y, SCREENSHOT_PADDING)
-            img_np = np.array(img)
 
-            results = self._reader.readtext(img_np, detail=0)
-            ocr_text = " | ".join(results).strip()
+            if self._reader is not None:
+                img_np   = np.array(img)
+                results  = self._reader.readtext(img_np, detail=0)
+                ocr_text = " | ".join(results).strip()
+            else:
+                ocr_text = ""   # OCR indisponible : contexte visuel sans texte
             label = derive_label(ocr_text, action_type)
 
             ctx = VisualContext(

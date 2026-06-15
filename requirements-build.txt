@@ -1,0 +1,32 @@
+# ─── Dépendances du BINAIRE LÉGER Windows (PyInstaller) ───────────────────────
+# Identique à requirements.txt MAIS SANS easyocr / torch (≈ build léger ~200 Mo).
+# L'ancrage visuel OCR est optionnel (décoché par défaut depuis la v6.3) : le
+# binaire produit ne l'embarque pas. Pour une build complète avec OCR, ajouter
+# easyocr (qui tire torch) et adapter winghost.spec (retirer les `excludes`).
+
+# Automatisation bureau
+pyautogui>=0.9.54
+pynput>=1.7.6
+
+# Traitement image
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# Détection multi-moniteurs
+screeninfo>=0.8.1
+
+# Dashboard web
+flask>=3.0.0
+
+# Interface graphique moderne
+customtkinter>=5.2.0
+
+# Capture du nom d'application Windows en premier plan
+pywin32>=306
+psutil>=5.9.0
+
+# Icône de zone de notification (mode automatique)
+pystray>=0.19.4
+
+# Outil d'empaquetage
+pyinstaller>=6.3.0

@@ -27,7 +27,9 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-DB_PATH = Path("winghost_stats.db")
+from paths import data_dir
+
+DB_PATH = data_dir() / "winghost_stats.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (

@@ -92,9 +92,11 @@ try:
 except Exception:
     _HAS_TRAY = False
 
+from paths import resource_path, data_dir
+
 # Compat : chercher scénarios dans les deux dossiers (migration v3→v4)
-_LEGACY_SESSIONS_DIR = Path("sessions")
-SCENARIOS_DIR_LOCAL  = SCENARIOS_DIR  # Path("scenarios")
+_LEGACY_SESSIONS_DIR = data_dir() / "sessions"
+SCENARIOS_DIR_LOCAL  = SCENARIOS_DIR  # data_dir()/"scenarios"
 
 # ─── Palette CHU Toulouse — couleurs officielles ─────────────────────────────
 # Extraites du SVG officiel : dégradé #adce80→#4eaf98→#3c9aac→#006471→#004d6b
@@ -403,7 +405,7 @@ class App(ctk.CTk):
         """Définit l'icône de la fenêtre (barre des tâches) avec la coquille CHU."""
         try:
             from PIL import Image, ImageTk
-            png = Path("assets/logo_chu.png")
+            png = resource_path("assets/logo_chu.png")
             if png.exists():
                 pil = Image.open(png).convert("RGBA")
             elif _HAS_LOGO:
@@ -429,7 +431,7 @@ class App(ctk.CTk):
         img = None
         try:
             from PIL import Image
-            png = Path("assets/logo_chu.png")
+            png = resource_path("assets/logo_chu.png")
             if png.exists():
                 pil = Image.open(png).convert("RGBA").resize(
                     (size, size), Image.LANCZOS)
@@ -1181,6 +1183,15 @@ class App(ctk.CTk):
 
     def _on_visual_gate_toggle(self):
         """Active/grise le seuil OCR selon l'état de la case « contexte visuel »."""
+        # Binaire léger sans EasyOCR : la vérification visuelle est indisponible.
+        if self._visual_gate_var.get() and not _HAS_EASYOCR:
+            messagebox.showinfo(
+                "OCR non disponible",
+                "Cette version n'embarque pas la reconnaissance visuelle (EasyOCR).\n\n"
+                "Le rejeu s'effectue sans vérification du contexte visuel.\n"
+                "Pour activer l'ancrage OCR, utilisez la version complète ou "
+                "installez WinGhost depuis les sources (pip install easyocr).")
+            self._visual_gate_var.set(False)
         enabled = bool(self._visual_gate_var.get())
         state = "normal" if enabled else "disabled"
         color = _FG2 if enabled else _BG4
@@ -1470,7 +1481,7 @@ class App(ctk.CTk):
         # Propose le fichier le plus récent
         dst = filedialog.asksaveasfilename(
             title="Exporter le journal officiel",
-            initialdir=Path("logs"),
+            initialdir=data_dir() / "logs",
             initialfile=paths[0].name,
             defaultextension=".csv",
             filetypes=[("CSV", "*.csv"), ("Tous", "*.*")],

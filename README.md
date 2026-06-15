@@ -156,6 +156,35 @@ pip install -r requirements.txt
 
 ---
 
+## Binaire Windows (`.exe`)
+
+Un **exécutable unique x64** (`WinGhost.exe`) peut être produit avec PyInstaller — aucune installation de Python requise sur la machine cible.
+
+### Build automatique (recommandé)
+
+Le workflow **`.github/workflows/build-windows.yml`** compile le binaire sur un runner `windows-latest` :
+
+- **Manuellement** : onglet *Actions* → *Build Windows x64* → *Run workflow* → l'exe est téléchargeable en **artefact**
+- **Sur release** : pousser un tag `v*` (ex. `git tag v6.3.0 && git push --tags`) → l'exe est attaché à la **Release** GitHub
+
+### Build local (sur une machine Windows x64)
+
+```bat
+pip install -r requirements-build.txt
+pyinstaller --noconfirm --clean winghost.spec
+:: => dist\WinGhost.exe
+```
+
+> ⚙️ **Build léger (~200 Mo)** : EasyOCR / PyTorch sont **exclus** du binaire. L'ancrage visuel OCR étant optionnel et décoché par défaut (v6.3), le RPA pur fonctionne tel quel ; cocher « Vérifier le contexte visuel (OCR) » affiche alors un message indiquant que l'OCR n'est pas embarqué.
+>
+> Pour une **build complète avec OCR** (~1,5–2,5 Go), retirer `torch`/`torchvision`/`easyocr` des `excludes` de `winghost.spec` et installer ces paquets avant le build.
+>
+> 🚫 **PyInstaller ne cross-compile pas** : le binaire Windows doit être généré **sur Windows** (d'où le runner CI). La cible **32 bits (i386/win32) n'est pas supportée** (PyTorch n'a plus de wheels 32 bits) — **x64 uniquement**.
+
+Données d'exécution (`scenarios/`, `reports/`, `logs/`, `winghost_stats.db`) : écrites **à côté de l'exe** si le dossier est inscriptible, sinon dans `%APPDATA%\WinGhost`.
+
+---
+
 ## Utilisation
 
 ### Interface graphique (recommandé)

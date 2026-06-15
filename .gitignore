@@ -7,6 +7,10 @@ __pycache__/
 build/
 dist/
 
+# Artefacts PyInstaller
+assets/logo_chu.ico
+assets/logo_chu_preview.png
+
 # Environnements virtuels
 .venv/
 venv/

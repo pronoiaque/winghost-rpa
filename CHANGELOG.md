@@ -7,6 +7,17 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ## [6.3.0] — 2026-06-13
 
+### Ajouté
+
+#### 📦 Binaire Windows x64 unique (PyInstaller)
+- **`winghost.spec`** : recette PyInstaller produisant un exécutable **one-file** `dist/WinGhost.exe` (application fenêtrée, icône CHU générée depuis le PNG)
+- **Build léger** : EasyOCR / PyTorch sont **exclus** du binaire (≈ 200 Mo au lieu de ~1,5–2,5 Go). L'ancrage visuel OCR étant optionnel et décoché par défaut, le RPA pur (clics, saisies, molette, glisser, mouvements, timing, dashboard, mode automatique) fonctionne tel quel
+- **`.github/workflows/build-windows.yml`** : compilation automatique sur `windows-latest` (PyInstaller ne cross-compile pas) — artefact à chaque exécution, **Release** avec l'exe attaché sur tag `v*`
+- **`requirements-build.txt`** : dépendances du build léger (sans easyocr/torch)
+- **`paths.py`** : résolution des chemins compatible binaire gelé — ressources en lecture seule via `sys._MEIPASS`, données inscriptibles (scénarios, rapports, journaux, base SQLite) à côté de l'exe ou dans `%APPDATA%\WinGhost`
+- **EasyOCR rendu optionnel** : `recorder.py` / `replayer.py` l'importent paresseusement ; absent, l'enregistrement se fait sans label OCR (screenshots conservés) et le gate visuel se désactive proprement (avertissement clair dans l'IHM)
+- Tous les dossiers d'exécution (`sessions/`, `scenarios/`, `reports/`, `logs/`, `winghost_stats.db`) passent par `paths.data_dir()` ; l'enregistrement 32 bits (`i386`/win32) n'est pas supporté (PyTorch n'a plus de wheels 32 bits — x64 uniquement)
+
 ### Modifié
 
 #### 🔓 La vérification visuelle OCR devient optionnelle (désactivée par défaut)

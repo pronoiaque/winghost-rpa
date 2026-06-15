@@ -37,10 +37,12 @@ import datetime
 import io
 from pathlib import Path
 
+from paths import data_dir
+
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-LOGS_DIR = Path("logs")
-LOGS_DIR.mkdir(exist_ok=True)
+LOGS_DIR = data_dir() / "logs"
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 _CSV_SEP     = ";"
 _ENCODING    = "utf-8-sig"   # UTF-8 BOM — Excel l'ouvre correctement sans conversion
