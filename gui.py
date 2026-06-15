@@ -60,11 +60,13 @@ except ImportError:
     print("customtkinter requis : pip install customtkinter", file=sys.stderr)
     sys.exit(1)
 
+# v6.6 : EasyOCR supprimé — template matching OpenCV via locator.py
 try:
-    import easyocr as _easyocr
-    _HAS_EASYOCR = True
-except ImportError:
-    _HAS_EASYOCR = False
+    import locator as _locator
+    _HAS_LOCATOR = _locator.is_available()
+except Exception:
+    _locator = None  # type: ignore
+    _HAS_LOCATOR = False
 
 try:
     import chu_logo
@@ -294,7 +296,6 @@ class App(ctk.CTk):
         self._center_window(800, 600)
         self._set_window_icon()
 
-        self._ocr_reader = None
         self._recorder: ActionRecorder | None  = None
         self._replayer: ActionReplayer | None  = None
         self._multi_runner: MultiReplayRunner | None = None
@@ -382,12 +383,10 @@ class App(ctk.CTk):
                 pass
 
         def _load():
-            _step("Initialisation EasyOCR…")
-            if _HAS_EASYOCR:
-                self._ocr_reader = _easyocr.Reader(
-                    ["fr", "en"], gpu=False, verbose=False)
-            _step("EasyOCR prêt ✓", done=True)
-            time.sleep(0.5)
+            _step("Initialisation…")
+            cv_status = "OpenCV ✓" if _HAS_LOCATOR else "OpenCV absent (repli coords)"
+            _step(f"Prêt — localisation dynamique : {cv_status}", done=True)
+            time.sleep(0.4)
             self.after(0, _done)
 
         def _done():
@@ -623,53 +622,59 @@ class App(ctk.CTk):
                      font=_FONT_SM, text_color=_FG2).pack(
             anchor="w", padx=12, pady=(10, 4))
 
-        # Gate visuel OCR — option DÉCOCHÉE par défaut (v6.3)
-        gate_row = ctk.CTkFrame(opt, fg_color="transparent")
-        gate_row.pack(fill="x", padx=10, pady=(4, 2))
-        self._visual_gate_var = tk.BooleanVar(value=False)
-        self._visual_gate_chk = ctk.CTkCheckBox(
-            gate_row,
-            text="Vérifier le contexte visuel (OCR)",
-            variable=self._visual_gate_var,
+        # Localisation dynamique (v6.6) — template matching OpenCV
+        loc_row = ctk.CTkFrame(opt, fg_color="transparent")
+        loc_row.pack(fill="x", padx=10, pady=(4, 2))
+        self._localize_var = tk.BooleanVar(value=False)
+        loc_chk = ctk.CTkCheckBox(
+            loc_row,
+            text="Localisation dynamique (vision)",
+            variable=self._localize_var,
             onvalue=True, offvalue=False,
             font=_FONT_SM, text_color=_FG,
             fg_color=_ACCENT, hover_color=_BLUE_DARK,
             checkmark_color=_ON_ACCENT,
-            command=self._on_visual_gate_toggle,
+            command=self._on_localize_toggle,
         )
-        self._visual_gate_chk.pack(side="left")
-        CTkToolTip(self._visual_gate_chk,
-                   "Si coché : les clics et saisies ne sont rejoués que si le\n"
-                   "contexte visuel correspond (ancrage OCR + seuil ci-dessous).\n"
-                   "Décoché (par défaut) : toutes les actions sont rejouées\n"
-                   "sans vérification — rejeu plus rapide et plus robuste.")
+        loc_chk.pack(side="left")
+        _loc_tip = (
+            "Relocalise chaque clic/saisie par reconnaissance d'image\n"
+            "(template matching OpenCV multi-échelle) avant de rejouer.\n"
+            "Robuste aux déplacements de fenêtre, RDP et changements de\n"
+            "mise en page. Désactivé = coordonnées absolues enregistrées.\n"
+            + ("⚠ OpenCV absent — option inactive." if not _HAS_LOCATOR else
+               "✔ OpenCV disponible.")
+        )
+        CTkToolTip(loc_chk, _loc_tip)
+        if not _HAS_LOCATOR:
+            loc_chk.configure(state="disabled")
 
-        # Seuil OCR — pertinent uniquement quand le gate visuel est coché
-        ocr_row = ctk.CTkFrame(opt, fg_color="transparent")
-        ocr_row.pack(fill="x", padx=10, pady=2)
-        self._ocr_threshold_lbl_l = ctk.CTkLabel(
-            ocr_row, text="Seuil OCR", font=_FONT_SM,
-            text_color=_FG2, width=90)
-        self._ocr_threshold_lbl_l.pack(side="left")
-        self._ocr_threshold_var = tk.DoubleVar(value=0.25)
-        ocr_lbl = ctk.CTkLabel(ocr_row, textvariable=tk.StringVar(),
-                                font=_FONT_SM, text_color=_FG, width=36)
-        ocr_lbl.pack(side="right")
+        # Seuil de confiance image
+        conf_row = ctk.CTkFrame(opt, fg_color="transparent")
+        conf_row.pack(fill="x", padx=10, pady=2)
+        self._conf_lbl_l = ctk.CTkLabel(
+            conf_row, text="Confiance", font=_FONT_SM, text_color=_FG2, width=90)
+        self._conf_lbl_l.pack(side="left")
+        self._ocr_threshold_var = tk.DoubleVar(value=0.75)
+        conf_val_lbl = ctk.CTkLabel(conf_row, textvariable=tk.StringVar(),
+                                     font=_FONT_SM, text_color=_FG, width=36)
+        conf_val_lbl.pack(side="right")
         self._ocr_slider = ctk.CTkSlider(
-            ocr_row, variable=self._ocr_threshold_var,
-            from_=0.0, to=1.0, number_of_steps=20,
+            conf_row, variable=self._ocr_threshold_var,
+            from_=0.50, to=1.0, number_of_steps=20,
             button_color=_ACCENT, button_hover_color=_ACCENT,
             progress_color=_ACCENT, fg_color=_BG3,
-            command=lambda v: ocr_lbl.configure(text=f"{v:.2f}"),
+            command=lambda v: conf_val_lbl.configure(text=f"{v:.2f}"),
         )
         self._ocr_slider.pack(side="left", fill="x", expand=True, padx=6)
-        ocr_lbl.configure(text=f"{self._ocr_threshold_var.get():.2f}")
+        conf_val_lbl.configure(text=f"{self._ocr_threshold_var.get():.2f}")
         CTkToolTip(self._ocr_slider,
-                   "Score minimum de similarité OCR pour valider une action\n"
-                   "0.0 = jamais ignorer · 1.0 = correspondance parfaite requise\n"
-                   "(actif uniquement si « Vérifier le contexte visuel » est coché)")
-        # État initial : gate décoché → slider grisé
-        self._on_visual_gate_toggle()
+                   "Score minimum de similarité visuelle (0.50→1.0)\n"
+                   "pour que la relocalisation template soit acceptée.\n"
+                   "0.75 = valeur recommandée ; réduire si trop de replis.\n"
+                   "(actif uniquement si « Localisation dynamique » est coché)")
+        # État initial
+        self._on_localize_toggle()
 
         # Répétitions
         rep_row = ctk.CTkFrame(opt, fg_color="transparent")
@@ -925,7 +930,7 @@ class App(ctk.CTk):
         self.after(500, self._load_official_log)
 
     def _build_report_tab(self, parent):
-        cols = ("#", "Type", "Cible", "OCR", "Visuel", "Réponse (ms)", "Statut")
+        cols = ("#", "Type", "Cible", "Localisation", "Clavier", "Réponse (ms)", "Statut")
         frame = ctk.CTkFrame(parent, fg_color=_BG3, corner_radius=8)
         frame.pack(fill="both", expand=True, padx=4, pady=4)
 
@@ -949,13 +954,13 @@ class App(ctk.CTk):
                                    style="V4.Treeview", yscrollcommand=sb.set)
         for col in cols:
             self._tree.heading(col, text=col)
-        self._tree.column("#",            width=40,  stretch=False)
-        self._tree.column("Type",         width=100, stretch=False)
-        self._tree.column("Cible",        width=180, stretch=True)
-        self._tree.column("OCR",          width=60,  stretch=False)
-        self._tree.column("Visuel",       width=60,  stretch=False)
-        self._tree.column("Réponse (ms)", width=100, stretch=False)
-        self._tree.column("Statut",       width=150, stretch=True)
+        self._tree.column("#",              width=40,  stretch=False)
+        self._tree.column("Type",           width=100, stretch=False)
+        self._tree.column("Cible",          width=160, stretch=True)
+        self._tree.column("Localisation",   width=90,  stretch=False)
+        self._tree.column("Clavier",        width=70,  stretch=False)
+        self._tree.column("Réponse (ms)",   width=100, stretch=False)
+        self._tree.column("Statut",         width=130, stretch=True)
         sb.config(command=self._tree.yview)
         self._tree.pack(fill="both", expand=True)
 
@@ -1245,8 +1250,7 @@ class App(ctk.CTk):
         if self._recorder is None:
             name = self._scenario_name_entry.get().strip() or ""
             target_app = self._target_app_entry.get().strip()
-            self._recorder = ActionRecorder(scenario_name=name, target_app=target_app,
-                                             reader=self._ocr_reader)
+            self._recorder = ActionRecorder(scenario_name=name, target_app=target_app)
             self._recorder.start()
             self._rec_btn.configure(text="⏹️\nSTOP REC",
                                      fg_color="#8A2F3A", hover_color="#702430")
@@ -1268,23 +1272,14 @@ class App(ctk.CTk):
 
     # ── Replay ────────────────────────────────────────────────────────────────
 
-    def _on_visual_gate_toggle(self):
-        """Active/grise le seuil OCR selon l'état de la case « contexte visuel »."""
-        # Binaire léger sans EasyOCR : la vérification visuelle est indisponible.
-        if self._visual_gate_var.get() and not _HAS_EASYOCR:
-            messagebox.showinfo(
-                "OCR non disponible",
-                "Cette version n'embarque pas la reconnaissance visuelle (EasyOCR).\n\n"
-                "Le rejeu s'effectue sans vérification du contexte visuel.\n"
-                "Pour activer l'ancrage OCR, utilisez la version complète ou "
-                "installez WinGhost depuis les sources (pip install easyocr).")
-            self._visual_gate_var.set(False)
-        enabled = bool(self._visual_gate_var.get())
+    def _on_localize_toggle(self):
+        """Active/grise le seuil de confiance selon l'état de la case localisation."""
+        enabled = bool(self._localize_var.get()) and _HAS_LOCATOR
         state = "normal" if enabled else "disabled"
         color = _FG2 if enabled else _BG4
         try:
             self._ocr_slider.configure(state=state)
-            self._ocr_threshold_lbl_l.configure(text_color=color)
+            self._conf_lbl_l.configure(text_color=color)
         except Exception:
             pass
 
@@ -1320,14 +1315,13 @@ class App(ctk.CTk):
         if n_runs > 1:
             self._log_debug(f"  Intervalle : {interval}s", "info")
 
-        visual_gate = bool(self._visual_gate_var.get())
+        localize = bool(self._localize_var.get()) and _HAS_LOCATOR
 
         if n_runs == 1:
             self._replayer = ActionReplayer(
-                ocr_similarity_min=self._ocr_threshold_var.get(),
+                localize=localize,
+                locator_confidence=self._ocr_threshold_var.get(),
                 on_progress=self._on_action_progress,
-                reader=self._ocr_reader,
-                visual_gate=visual_gate,
             )
             session = self._replayer.load_session(self._session_path)
             self._total_actions = len(session.get("actions", []))
@@ -1339,8 +1333,7 @@ class App(ctk.CTk):
                 on_run_start=self._on_multi_run_start,
                 on_run_done=self._on_multi_run_done,
                 on_progress=self._on_action_progress,
-                visual_gate=visual_gate,
-                reader=self._ocr_reader,
+                localize=localize,
             )
             with open(self._session_path, encoding="utf-8") as f:
                 _s = json.load(f)
@@ -1409,9 +1402,12 @@ class App(ctk.CTk):
         """Écrit une description « humainement lisible » de l'action rejouée."""
         ts   = datetime.datetime.now().strftime("%H:%M:%S")
         desc = self._human_description(result)
-        icon = "⚠" if result.skipped else ("✘" if result.error else "✔")
-        rt   = f"  ({result.response_time_ms:.0f} ms)" if result.response_time_ms else ""
-        line = f"[{ts}] {icon} {desc}{rt}\n"
+        icon    = "⚠" if result.skipped else ("✘" if result.error else "✔")
+        rt      = f"  ({result.response_time_ms:.0f} ms)" if result.response_time_ms else ""
+        loc_m   = getattr(result, "locator_method", "absolute")
+        loc_c   = getattr(result, "locator_conf", 0.0) or 0.0
+        loc_tag = f"  [🔍 {loc_c:.2f}]" if loc_m == "template" else ""
+        line    = f"[{ts}] {icon} {desc}{rt}{loc_tag}\n"
         try:
             box = self._replay_live_box._textbox
             box.configure(state="normal")
@@ -1542,14 +1538,19 @@ class App(ctk.CTk):
     # ── Rapport ───────────────────────────────────────────────────────────────
 
     def _add_tree_row(self, r: ActionResult):
-        ocr  = f"{r.ocr_match:.2f}" if r.ocr_match is not None else "—"
-        vis  = "✔" if r.visual_ok else ("✘" if r.visual_ok is False else "—")
-        resp = f"{r.response_time_ms:.0f}" if r.response_time_ms is not None else "—"
+        loc_m   = getattr(r, "locator_method", "absolute")
+        loc_c   = getattr(r, "locator_conf", 0.0) or 0.0
+        loc_icon = "🔍" if loc_m == "template" else "📌"
+        loc     = f"{loc_icon} {loc_c:.2f}" if loc_c > 0 else loc_icon
+        kb_sent = getattr(r, "keys_sent", None)
+        kb_tot  = getattr(r, "keys_total", None)
+        clav    = f"{'✔' if kb_sent == kb_tot else '⚠'} {kb_sent}/{kb_tot}" if kb_tot else "—"
+        resp    = f"{r.response_time_ms:.0f}" if r.response_time_ms is not None else "—"
         tag, status = (("warn", "IGNORÉ") if r.skipped
                        else (("error", r.error[:40]) if r.error else ("ok", "OK")))
         iid = self._tree.insert("", "end",
                                  values=(r.index, r.action_type,
-                                         r.label or "—", ocr, vis, resp, status))
+                                         r.label or "—", loc, clav, resp, status))
         self._tree.item(iid, tags=(tag,))
 
     def _clear_tree(self):
@@ -1951,8 +1952,7 @@ class App(ctk.CTk):
             on_cycle_done=self._on_auto_cycle_done,
             on_progress=self._on_action_progress,
             on_wait=self._on_auto_wait,
-            visual_gate=bool(self._visual_gate_var.get()),
-            reader=self._ocr_reader,
+            visual_gate=bool(self._localize_var.get()) and _HAS_LOCATOR,
         )
         self._auto_running = True
         self._auto_btn.configure(text="  ■  Arrêter l'automatique",

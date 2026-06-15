@@ -5,6 +5,43 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [6.6.0] — 2026-06-15
+
+### Modifié — Localisation dynamique OpenCV (template matching) — suppression EasyOCR/torch
+
+#### 🔍 Nouveau module `locator.py` — cascade de relocalisation visuelle
+- **EasyOCR et PyTorch sont entièrement supprimés** : plus de dépendance ~1 Go, build beaucoup plus léger
+- Remplacement par **OpenCV `cv2.matchTemplate` (TM_CCOEFF_NORMED)** en cascade multi-échelle (0.80×–1.20×)
+- **Recherche en deux passes** : zone locale ±400 px autour de la position enregistrée (rapide), puis plein écran en repli
+- Compatible **RDP, AppliDis, Win32, Web** : le matching opère au niveau des pixels rendus côté client, indépendant du protocole de transport
+- `LocateResult` retourne `(x, y, confidence, method, scale)` ; `method` vaut `"template"` ou `"absolute"`
+- Slot **Phase 2 (UI Automation)** scaffoldé dans `_try_uia()` pour future intégration Win32/web si nécessaire
+- Repli sur les **coordonnées absolues enregistrées** si aucun template disponible ou confiance sous le seuil
+
+#### 🎛️ Interface — Options de localisation
+- Le panneau OCR est remplacé par **« Localisation dynamique (vision) »** : case à cocher + curseur **Confiance** (0.50–1.0, défaut 0.75)
+- La case est **grisée si OpenCV est absent** (`_HAS_LOCATOR = locator.is_available()`)
+- Splash screen allégé : plus de chargement EasyOCR, affiche « Prêt — localisation dynamique : OpenCV ✓ »
+- Colonnes du tableau de rejeu : « Localisation » avec icônes 🔍 (template) / 📌 (absolu) et score de confiance
+- Journal « Replay live » : `[🔍 0.92]` ajouté quand le template matching est actif
+
+#### ⚙️ `recorder.py` — screenshots préservés comme templates
+- Les captures `screenshot_b64` dans `visual_context` deviennent les **patches templates** pour `locator.py`
+- Plus aucun appel EasyOCR ; `ocr_text` vaut toujours `""` (rétro-compatible avec les anciens scénarios)
+
+#### ⚙️ `replayer.py` — intégration locator
+- `LOCATOR_CONFIDENCE_MIN = 0.75` remplace `OCR_SIMILARITY_MIN`
+- `ActionResult` ajoute `locator_method` et `locator_conf`
+- `ActionReplayer` : paramètre `localize` (+ `visual_gate` comme alias rétro-compatible)
+- `_verify_visual()` supprimé ; rapport HTML : colonne « Localisation » (🔍/📌 + %)
+
+#### 🏗️ Build & packaging
+- `winghost.spec` : `cv2` retiré de `excludes`, `locator` et `cv2` ajoutés à `hiddenimports`
+- `requirements-build.txt` : `opencv-python-headless>=4.8.0` à la place d'EasyOCR/torch
+- `pyproject.toml` : dépendance `opencv-python>=4.8.0` (remplace `easyocr`)
+
+---
+
 ## [6.5.0] — 2026-06-15
 
 ### Modifié — Ergonomie « magnéto » & journal de rejeu lisible

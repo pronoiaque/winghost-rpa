@@ -40,7 +40,6 @@ v2 (conservé) :
 import base64
 import collections
 import datetime
-import difflib
 import io
 import json
 import logging
@@ -57,6 +56,7 @@ from recorder import screenshot_region, derive_label
 from paths import data_dir
 import winput
 import trace_log
+import locator as _locator
 import stats_db
 import official_log
 
@@ -65,15 +65,6 @@ import official_log
 # affichages mis à l'échelle (125 %/150 %).
 winput.enable_dpi_awareness()
 
-# EasyOCR est OPTIONNEL (v6.3+) : importé paresseusement uniquement quand le
-# gate visuel est activé. Absent, le replay fonctionne sans vérification OCR.
-try:
-    import easyocr
-    _HAS_EASYOCR = True
-except Exception:
-    easyocr = None
-    _HAS_EASYOCR = False
-
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 SESSIONS_DIR           = data_dir() / "sessions"
@@ -81,9 +72,7 @@ SCENARIOS_DIR          = data_dir() / "scenarios"
 REPORTS_DIR            = data_dir() / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-OCR_LANGUAGES          = ["fr", "en"]
-OCR_SIMILARITY_MIN     = 0.25   # v6.1 : abaissé (était 0.40) pour réduire les
-                                #        faux négatifs qui faisaient sauter les clics
+LOCATOR_CONFIDENCE_MIN = 0.75   # seuil template matching (configurable GUI)
 SCROLL_REPLAY_AMOUNT   = 100    # facteur appliqué à dy/dx de la molette au rejeu
 RESPONSE_WAIT_MAX      = 10.0
 RESPONSE_POLL_INTERVAL = 0.05
@@ -118,19 +107,22 @@ class ActionResult:
         self.label            = label
         self.x                = x
         self.y                = y
-        self.app_name         = app_name
-        self.ocr_match        = None   # float | None
-        self.visual_ok        = None   # bool | None
-        self.skipped          = False
-        self.error            = None   # str | None
-        self.t_action_sent    = None   # epoch
-        self.t_screen_changed = None   # epoch
-        self.response_time    = None   # float (s)
-        self.screenshot_b64   = None   # str | None  (PNG base64)
+        self.app_name          = app_name
+        self.ocr_match         = None   # conservé pour rétrocompatibilité JSON
+        self.visual_ok         = None
+        self.skipped           = False
+        self.error             = None   # str | None
+        self.t_action_sent     = None   # epoch
+        self.t_screen_changed  = None   # epoch
+        self.response_time     = None   # float (s)
+        self.screenshot_b64    = None   # str | None  (PNG base64)
         # v6.4 : vérification de la saisie clavier (caractères réellement émis)
-        self.keys_sent        = None   # int | None
-        self.keys_total       = None   # int | None
-        self.typed_text       = None   # str | None — texte saisi (action "type")
+        self.keys_sent         = None   # int | None
+        self.keys_total        = None   # int | None
+        self.typed_text        = None   # str | None — texte saisi (action "type")
+        # v6.6 : localisation dynamique (template matching)
+        self.locator_method    = "absolute"  # "template" | "absolute"
+        self.locator_conf      = 0.0         # float 0..1
 
     @property
     def response_time_ms(self) -> Optional[float]:
@@ -164,6 +156,8 @@ class ActionResult:
             "keys_sent":        self.keys_sent,
             "keys_total":       self.keys_total,
             "typed_text":       self.typed_text,
+            "locator_method":   self.locator_method,
+            "locator_conf":     round(self.locator_conf, 3),
             "screenshot_b64":   self.screenshot_b64,
         }
 
@@ -173,37 +167,25 @@ class ActionResult:
 class ActionReplayer:
     def __init__(
         self,
-        ocr_similarity_min: float = OCR_SIMILARITY_MIN,
+        ocr_similarity_min: float = LOCATOR_CONFIDENCE_MIN,  # rétrocompat nom arg
         on_progress: Optional[Callable[[int, int, "ActionResult"], None]] = None,
-        reader=None,
-        visual_gate: bool = False,
+        reader=None,       # ignoré (EasyOCR supprimé en v6.6)
+        visual_gate: bool = False,   # rétrocompat : si True → localisation activée
+        localize: bool = False,      # nouveau nom explicite
+        locator_confidence: float = LOCATOR_CONFIDENCE_MIN,
     ):
-        self.ocr_similarity_min  = ocr_similarity_min
-        # v6.3 : gate OCR optionnel, désactivé par défaut. Lorsqu'il est faux,
-        # aucune vérification visuelle n'est faite et toutes les actions sont rejouées.
-        self.visual_gate         = visual_gate
-        self.on_progress         = on_progress
+        # v6.6 : localisation dynamique remplace le gate OCR
+        self.localize           = localize or visual_gate
+        self.locator_confidence = locator_confidence if localize else ocr_similarity_min
+        self.on_progress        = on_progress
         self._results: list[ActionResult] = []
         self._stop_event = threading.Event()
         self._last_session: dict = {}
-        self._reader = reader
-
-        # L'OCR n'est nécessaire que si le gate visuel est actif. On n'initialise
-        # EasyOCR (coûteux, optionnel) que dans ce cas et seulement si aucun
-        # lecteur partagé n'a été fourni. S'il est indisponible (binaire léger
-        # sans PyTorch), on désactive proprement le gate.
-        if not visual_gate:
-            log.info("Gate visuel OCR désactivé — rejeu sans vérification.")
-        elif reader is not None:
-            log.info("Utilisation du lecteur OCR partagé.")
-        elif _HAS_EASYOCR:
-            log.info("Initialisation EasyOCR…")
-            self._reader = easyocr.Reader(OCR_LANGUAGES, gpu=False, verbose=False)
-            log.info("EasyOCR prêt.")
+        if self.localize:
+            log.info("Localisation dynamique activée (seuil=%.2f, OpenCV=%s).",
+                     self.locator_confidence, _locator.is_available())
         else:
-            log.warning("EasyOCR indisponible — gate visuel désactivé, "
-                        "rejeu de toutes les actions sans vérification.")
-            self.visual_gate = False
+            log.info("Localisation dynamique désactivée — rejeu sur coordonnées absolues.")
 
     # ── API publique ──────────────────────────────────────────────────────────
 
@@ -219,8 +201,9 @@ class ActionReplayer:
         actions = session.get("actions", [])
         total   = len(actions)
         trace_log.setup()
-        trace_log.log("REPLAY ▶ début (%d actions, gate visuel=%s, moteur clavier=%s)",
-                      total, self.visual_gate, winput.active_typing_backend())
+        trace_log.log("REPLAY ▶ début (%d actions, localisation=%s conf=%.2f, clavier=%s)",
+                      total, self.localize, self.locator_confidence,
+                      winput.active_typing_backend())
         log.info("Début du replay : %d action(s)", total)
 
         for i, raw in enumerate(actions):
@@ -453,8 +436,13 @@ class ActionReplayer:
             status = "IGNORÉ" if r.get("skipped") else ("ERREUR" if r.get("error") else "OK")
             cls    = {"OK": "ok", "IGNORÉ": "warn", "ERREUR": "err"}[status]
             resp   = f"{r['response_time_s']:.3f}" if r.get("response_time_s") is not None else "—"
-            ocr    = f"{r['ocr_match_score']:.2f}" if r.get("ocr_match_score") is not None else "—"
             label  = r.get("label") or "—"
+            # Localisation (v6.6)
+            loc_m  = r.get("locator_method", "absolute")
+            loc_c  = r.get("locator_conf", 0.0) or 0.0
+            loc_icon = "🔍" if loc_m == "template" else "📌"
+            loc_cell = (f'<td title="{loc_m}">{loc_icon} {loc_c:.2f}</td>'
+                        if loc_c > 0 else f'<td>{loc_icon}</td>')
             # Vérification clavier : caractères émis / attendus (v6.4)
             k_sent, k_total = r.get("keys_sent"), r.get("keys_total")
             if k_total:
@@ -473,9 +461,7 @@ class ActionReplayer:
                 f'<tr class="{cls}">'
                 f'<td>{r["index"]}</td><td>{r["action_type"]}</td>'
                 f'<td class="label-cell" title="{err_d}">{label}</td>'
-                f'{kb_cell}'
-                f'<td>{ocr}</td>'
-                f'<td>{"✔" if r.get("visual_ok") else ("✘" if r.get("visual_ok") is False else "—")}</td>'
+                f'{loc_cell}{kb_cell}'
                 f'<td>{resp}</td>{ss_cell}'
                 f'<td class="status">{status}</td>'
                 f'</tr>\n'
@@ -541,8 +527,8 @@ td.status{{font-weight:700}}
 <div class="table-wrap">
   <table>
     <thead><tr>
-      <th>#</th><th>Type</th><th>Cible</th><th>Clavier</th>
-      <th>Score OCR</th><th>Visuel OK</th><th>Réponse (s)</th>
+      <th>#</th><th>Type</th><th>Cible</th><th>Localisation</th>
+      <th>Clavier</th><th>Réponse (s)</th>
       <th>Screenshot</th><th>Statut</th>
     </tr></thead>
     <tbody>{rows_html}</tbody>
@@ -638,28 +624,24 @@ td.status{{font-weight:700}}
             result.t_action_sent = time.time()
             return result
 
-        # Vérification visuelle OCR — uniquement si le gate visuel est activé (v6.3).
-        # Par défaut (gate désactivé), aucune vérification : l'action est toujours rejouée.
-        if self.visual_gate and visual_ctx and visual_ctx.get("ocr_text"):
-            ok, score = self._verify_visual(
-                raw.get("x"), raw.get("y"),
-                visual_ctx["screenshot_region"],
-                visual_ctx["ocr_text"],
-            )
-            result.ocr_match = score
-            result.visual_ok = ok
-            if not ok:
-                result.skipped = True
-                result.error   = (
-                    f"Contexte visuel non reconnu "
-                    f"(score={score:.2f} < seuil={self.ocr_similarity_min:.2f}) — "
-                    f"cible: {label!r}"
-                )
-                log.warning("[%d/%d] #%d IGNORÉE — %r score=%.2f",
-                            i+1, total, result.index, label, score)
-                return result
-        else:
-            result.visual_ok = None
+        # Localisation dynamique (v6.6) — template matching si activé.
+        # Les actions sans coordonnées (key) sont exclues.
+        atype = raw.get("action_type", "")
+        if self.localize and atype in ("click", "double_click", "right_click",
+                                       "middle_click", "type", "drag"):
+            loc = _locator.locate(raw, confidence=self.locator_confidence)
+            result.locator_method = loc.method
+            result.locator_conf   = loc.confidence
+            if loc.method == "template":
+                # Mise à jour des coordonnées avec la position relocalisée
+                raw = dict(raw)  # copie locale, on ne modifie pas le scénario
+                raw["x"], raw["y"] = loc.x, loc.y
+                result.x, result.y = loc.x, loc.y
+                trace_log.log("REPLAY 🔍 localisation template (%d,%d) conf=%.3f",
+                              loc.x, loc.y, loc.confidence)
+            else:
+                trace_log.log("REPLAY 📌 repli coordonnées absolues (%d,%d)",
+                              loc.x, loc.y)
 
         pre_screenshot = self._take_full_screenshot()
 
@@ -702,23 +684,6 @@ td.status{{font-weight:700}}
             return None
 
     # ── Vérification OCR ──────────────────────────────────────────────────────
-
-    def _verify_visual(self, x, y, region, expected_text) -> tuple[bool, float]:
-        try:
-            if x is not None and y is not None:
-                img, _ = screenshot_region(x, y, SCREENSHOT_PADDING)
-            else:
-                rx, ry, rw, rh = region
-                img = pyautogui.screenshot(region=(rx, ry, rw, rh))
-            results      = self._reader.readtext(np.array(img), detail=0)
-            current_text = " | ".join(results).strip()
-            score        = difflib.SequenceMatcher(
-                None, expected_text.lower(), current_text.lower()
-            ).ratio()
-            return score >= self.ocr_similarity_min, score
-        except Exception as e:
-            log.warning("Erreur vérification visuelle : %s", e)
-            return False, 0.0
 
     # ── Exécution de l'action ─────────────────────────────────────────────────
 
@@ -834,17 +799,18 @@ class MultiReplayRunner:
 
     def __init__(
         self,
-        ocr_similarity_min:  float = OCR_SIMILARITY_MIN,
+        ocr_similarity_min:  float = LOCATOR_CONFIDENCE_MIN,
         on_run_start: Optional[Callable[[int, int], None]] = None,
         on_run_done:  Optional[Callable[[int, int, list[ActionResult]], None]] = None,
         on_progress:  Optional[Callable[[int, int, ActionResult], None]] = None,
         stop_event:   Optional[threading.Event] = None,
         visual_gate:  bool = False,
-        reader=None,
+        localize:     bool = False,
+        reader=None,  # ignoré (EasyOCR supprimé v6.6)
     ):
-        self.ocr_similarity_min  = ocr_similarity_min
-        self.visual_gate         = visual_gate
-        self.reader              = reader
+        self.localize            = localize or visual_gate
+        self.locator_confidence  = ocr_similarity_min
+        self.reader              = None
         self.on_run_start        = on_run_start
         self.on_run_done         = on_run_done
         self.on_progress         = on_progress
@@ -876,10 +842,9 @@ class MultiReplayRunner:
             log.info("═══ Run %d / %d ═══", i + 1, n)
 
             replayer = ActionReplayer(
-                ocr_similarity_min=self.ocr_similarity_min,
+                localize=self.localize,
+                locator_confidence=self.locator_confidence,
                 on_progress=self.on_progress,
-                visual_gate=self.visual_gate,
-                reader=self.reader,
             )
             replayer._stop_event = self._stop_event
 
