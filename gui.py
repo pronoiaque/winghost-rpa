@@ -1959,6 +1959,13 @@ class App(ctk.CTk):
 # ─── Lancement ────────────────────────────────────────────────────────────────
 
 def main():
+    # v6.4 : conscience DPI avant toute capture/clic (corrige la dérive souris
+    # sur affichages mis à l'échelle). Sans effet hors Windows.
+    try:
+        import winput
+        winput.enable_dpi_awareness()
+    except Exception:
+        pass
     app = App()
     app.mainloop()
 

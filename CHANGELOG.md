@@ -5,6 +5,34 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [6.4.0] — 2026-06-15
+
+### Corrigé — Précision des entrées (enregistrement / rejeu)
+
+#### 🎯 Dérive de la souris éliminée (conscience DPI)
+- **Cause** : pynput enregistre des **pixels physiques** alors que pyautogui rejouait dans un espace de coordonnées **virtualisé** dès que la mise à l'échelle de l'affichage dépassait 100 % (125 %/150 % par défaut sous Windows). L'écart croissait avec la distance → « dérive »
+- **Correctif** : nouveau module **`winput.py`** — `enable_dpi_awareness()` rend le processus *per-monitor DPI-aware* (API `SetProcessDpiAwarenessContext`, replis `shcore` puis `SetProcessDPIAware`) **avant toute capture/clic**. Appelé au plus tôt depuis le recorder, le replayer, le scheduler et l'IHM
+- `pyautogui.MINIMUM_DURATION = 0` : les déplacements visent désormais les coordonnées **exactes**, sans tween parasite
+
+#### ⌨️ Touches « jamais tapées » corrigées (saisie Unicode fiable)
+- **Cause** : `pyautogui.typewrite()` **ignore silencieusement** tout caractère hors de son jeu ASCII — soit **tous les accents français** (é è à ç ù…), l'€, etc. Le texte français disparaissait en grande partie
+- **Correctif** : `winput.type_text()` injecte le texte via **`pynput.keyboard.Controller`** (injection Unicode native Windows), caractère par caractère, avec repli pyautogui. `winput.press_key()` gère les touches spéciales avec une table de correspondance étendue (page_up/down, F1–F20, modificateurs, alt_gr…)
+- À l'enregistrement, les **caractères de contrôle** issus des combinaisons Ctrl/Alt (ex. Ctrl+A → `\x01`) ne polluent plus la saisie bufferisée
+
+#### ⏱️ Métrique de temps à la milliseconde (horloge haute résolution)
+- Les délais inter-actions sont désormais mesurés sur **`time.perf_counter()`** (sous-microseconde) au lieu de `time.time()` (granularité ~15 ms sous Windows) → cadence du rejeu fidèle à l'enregistrement. Le timestamp epoch lisible est conservé pour l'horodatage
+
+#### 🔎 Vérification de la saisie clavier dans les journaux et rapports
+- `type_text()` renvoie **(caractères émis / caractères attendus)** ; en cas de saisie incomplète, un avertissement explicite apparaît dans les logs (`⚠ Saisie incomplète : n/m caractères émis`)
+- Nouveaux champs `keys_sent` / `keys_total` sur `ActionResult` (JSON de rapport) et **nouvelle colonne « Clavier »** (`✔ n/m` ou `⚠ n/m`) dans le rapport HTML
+
+### Détails techniques
+- **`winput.py`** : `enable_dpi_awareness()` (idempotent, sans exception, no-op hors Windows), `now()` (perf_counter), `type_text(text, interval)`, `press_key(name)`
+- `recorder.py` : `_compute_delay()` bascule sur l'horloge monotone ; filtrage des caractères de contrôle dans `_on_key_press`
+- `replayer.py` : `_execute()` utilise `winput` pour `type`/`key` et renseigne `keys_sent`/`keys_total` ; `MINIMUM_DURATION = 0`
+
+---
+
 ## [6.3.0] — 2026-06-13
 
 ### Ajouté

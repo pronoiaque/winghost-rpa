@@ -55,8 +55,14 @@ from PIL import Image
 
 from recorder import screenshot_region, derive_label
 from paths import data_dir
+import winput
 import stats_db
 import official_log
+
+# v6.4 : conscience DPI dès l'import pour que le rejeu vise les mêmes pixels
+# (physiques) que ceux enregistrés — corrige la dérive de la souris sur les
+# affichages mis à l'échelle (125 %/150 %).
+winput.enable_dpi_awareness()
 
 # EasyOCR est OPTIONNEL (v6.3+) : importé paresseusement uniquement quand le
 # gate visuel est activé. Absent, le replay fonctionne sans vérification OCR.
@@ -88,6 +94,9 @@ SCREENSHOT_REGION_PAD  = 160   # padding plus large pour le screenshot post-acti
 
 pyautogui.PAUSE    = PYAUTOGUI_PAUSE
 pyautogui.FAILSAFE = True
+# v6.4 : pas de durée minimale imposée aux déplacements → positionnement exact
+# (les déplacements instantanés visent directement les coordonnées cibles).
+pyautogui.MINIMUM_DURATION = 0.0
 
 logging.basicConfig(
     level=logging.INFO,
@@ -117,6 +126,9 @@ class ActionResult:
         self.t_screen_changed = None   # epoch
         self.response_time    = None   # float (s)
         self.screenshot_b64   = None   # str | None  (PNG base64)
+        # v6.4 : vérification de la saisie clavier (caractères réellement émis)
+        self.keys_sent        = None   # int | None
+        self.keys_total       = None   # int | None
 
     @property
     def response_time_ms(self) -> Optional[float]:
@@ -147,6 +159,8 @@ class ActionResult:
             "t_screen_changed": self.t_screen_changed,
             "response_time_s":  round(self.response_time, 3) if self.response_time is not None else None,
             "response_time_ms": self.response_time_ms,
+            "keys_sent":        self.keys_sent,
+            "keys_total":       self.keys_total,
             "screenshot_b64":   self.screenshot_b64,
         }
 
@@ -435,6 +449,13 @@ class ActionReplayer:
             resp   = f"{r['response_time_s']:.3f}" if r.get("response_time_s") is not None else "—"
             ocr    = f"{r['ocr_match_score']:.2f}" if r.get("ocr_match_score") is not None else "—"
             label  = r.get("label") or "—"
+            # Vérification clavier : caractères émis / attendus (v6.4)
+            k_sent, k_total = r.get("keys_sent"), r.get("keys_total")
+            if k_total:
+                mark = "✔" if k_sent == k_total else "⚠"
+                kb_cell = f'<td>{mark} {k_sent}/{k_total}</td>'
+            else:
+                kb_cell = "<td>—</td>"
             err_d  = r.get("error") or ""
             ss     = r.get("screenshot_b64") or ""
             ss_cell = (
@@ -446,6 +467,7 @@ class ActionReplayer:
                 f'<tr class="{cls}">'
                 f'<td>{r["index"]}</td><td>{r["action_type"]}</td>'
                 f'<td class="label-cell" title="{err_d}">{label}</td>'
+                f'{kb_cell}'
                 f'<td>{ocr}</td>'
                 f'<td>{"✔" if r.get("visual_ok") else ("✘" if r.get("visual_ok") is False else "—")}</td>'
                 f'<td>{resp}</td>{ss_cell}'
@@ -513,7 +535,7 @@ td.status{{font-weight:700}}
 <div class="table-wrap">
   <table>
     <thead><tr>
-      <th>#</th><th>Type</th><th>Cible</th>
+      <th>#</th><th>Type</th><th>Cible</th><th>Clavier</th>
       <th>Score OCR</th><th>Visuel OK</th><th>Réponse (s)</th>
       <th>Screenshot</th><th>Statut</th>
     </tr></thead>
@@ -636,7 +658,7 @@ td.status{{font-weight:700}}
         pre_screenshot = self._take_full_screenshot()
 
         try:
-            self._execute(raw)
+            self._execute(raw, result)
             result.t_action_sent = time.time()
         except Exception as e:
             result.error = f"Erreur exécution : {e}"
@@ -694,7 +716,7 @@ td.status{{font-weight:700}}
 
     # ── Exécution de l'action ─────────────────────────────────────────────────
 
-    def _execute(self, raw: dict):
+    def _execute(self, raw: dict, result: Optional["ActionResult"] = None):
         atype = raw.get("action_type")
         x, y  = raw.get("x"), raw.get("y")
 
@@ -729,18 +751,25 @@ td.status{{font-weight:700}}
             if x and y:
                 pyautogui.click(x, y)
                 time.sleep(0.1)
-            pyautogui.typewrite(raw.get("text", ""), interval=0.03)
+            text = raw.get("text", "")
+            # v6.4 : saisie fiable Unicode (accents é è à ç € inclus) via pynput.
+            sent, total = winput.type_text(text)
+            if result is not None:
+                result.keys_sent, result.keys_total = sent, total
+            if total and sent < total:
+                log.warning("    ⚠ Saisie incomplète : %d/%d caractères émis "
+                            "(la cible a refusé certains caractères).", sent, total)
+            else:
+                log.info("    ✓ Saisie vérifiée : %d/%d caractères émis.", sent, total)
         elif atype == "key":
-            key_map = {
-                "enter": "enter", "tab": "tab", "escape": "esc", "space": "space",
-                "backspace": "backspace", "delete": "delete",
-                "up": "up", "down": "down", "left": "left", "right": "right",
-                "home": "home", "end": "end",
-                "page_up": "pageup", "page_down": "pagedown",
-                "f1": "f1", "f2": "f2", "f3": "f3", "f4": "f4",
-                "f5": "f5", "f6": "f6", "f7": "f7", "f8": "f8",
-            }
-            pyautogui.press(key_map.get(raw.get("key", ""), raw.get("key", "")))
+            # v6.4 : touches spéciales fiables (pynput d'abord, repli pyautogui).
+            name = raw.get("key", "")
+            ok = winput.press_key(name)
+            if result is not None:
+                result.keys_sent  = 1 if ok else 0
+                result.keys_total = 1
+            if not ok:
+                log.warning("    ⚠ Touche %r non émise.", name)
         elif atype == "move":
             if x is not None and y is not None:
                 pyautogui.moveTo(x, y, duration=0.05)

@@ -1,11 +1,22 @@
-# WinGhost RPA v6.3 — CHU Toulouse
+# WinGhost RPA v6.4 — CHU Toulouse
 
 > Enregistreur / Rejoueur RPA Windows **aux couleurs du CHU de Toulouse**, avec ancrage visuel OCR **optionnel**, capture de tous les inputs souris (clics, molette, glisser), enregistrement des mouvements, splash screen de démarrage, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
 
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-6.3.0-green)
+![Version](https://img.shields.io/badge/version-6.4.0-green)
+
+---
+
+## Nouveautés v6.4 — Précision des entrées
+
+| Correctif | Description |
+|---|---|
+| 🎯 **Fin de la dérive de la souris** | Le processus devient *per-monitor DPI-aware* (`winput.enable_dpi_awareness()`) : enregistrement (pixels physiques) et rejeu visent le **même repère**, même avec un affichage à 125 %/150 %. Les déplacements ciblent les coordonnées **exactes** (`MINIMUM_DURATION = 0`) |
+| ⌨️ **Saisie clavier fiable (accents inclus)** | Fin des touches « jamais tapées » : la saisie passe par `pynput` (injection **Unicode**), ce qui restitue **é è à ç ù €**… que `pyautogui.typewrite()` ignorait en silence. Touches spéciales gérées via table étendue (page_up/down, F1–F20, alt_gr…) |
+| ⏱️ **Délais à la milliseconde** | Cadence mesurée sur `time.perf_counter()` (sous-µs) au lieu de `time.time()` (~15 ms sous Windows) → rejeu fidèle au tempo enregistré |
+| 🔎 **Vérification clavier dans les rapports** | Chaque saisie consigne **caractères émis / attendus** ; avertissement explicite si incomplet (logs) + nouvelle colonne **« Clavier »** (`✔ n/m`) dans le rapport HTML |
 
 ---
 

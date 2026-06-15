@@ -38,6 +38,10 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import official_log
+import winput
+
+# v6.4 : conscience DPI dès l'import (le scheduler rejoue des scénarios).
+winput.enable_dpi_awareness()
 
 log = logging.getLogger("scheduler")
 

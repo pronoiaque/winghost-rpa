@@ -39,6 +39,11 @@ import numpy as np
 from pynput import mouse, keyboard
 
 from paths import data_dir
+import winput
+
+# v6.4 : conscience DPI dès l'import du recorder pour que les coordonnées
+# enregistrées (pixels physiques) coïncident avec celles du rejeu.
+winput.enable_dpi_awareness()
 
 # EasyOCR est OPTIONNEL (v6.3+) : il tire PyTorch (lourd) et n'est requis que
 # pour l'ancrage visuel. On l'importe paresseusement ; absent, l'enregistrement
@@ -232,6 +237,7 @@ class ActionRecorder:
         self.recording = False
         self._lock = threading.Lock()
         self._last_timestamp: float = 0.0
+        self._last_perf: float = 0.0   # horloge monotone (délais à la ms, v6.4)
         self._action_index = 0
         self._pending_click: Optional[tuple] = None   # (x, y, button, t)
         self._press_info: Optional[tuple] = None      # (x, y, button, t) du bouton enfoncé
@@ -263,6 +269,7 @@ class ActionRecorder:
         self.actions.clear()
         self._action_index = 0
         self._last_timestamp = time.time()
+        self._last_perf = 0.0
         self._typed_buffer = ""
 
         self._mouse_listener = mouse.Listener(
@@ -422,12 +429,18 @@ class ActionRecorder:
         t = time.time()
 
         try:
-            # Caractère imprimable → bufferisation
+            # Caractère imprimable → bufferisation.
+            # On ignore les caractères de contrôle (ord < 32) produits par les
+            # combinaisons Ctrl/Alt (ex. Ctrl+A → '\x01') qui pollueraient la
+            # saisie rejouée. Seuls les vrais caractères imprimables sont gardés.
             char = key.char
-            if char:
+            if char and (len(char) != 1 or ord(char) >= 32):
                 self._typed_buffer += char
                 self._last_key_time = t
                 return
+            if char:
+                # caractère de contrôle : on bascule en touche spéciale ci-dessous
+                self._flush_typed_buffer()
         except AttributeError:
             pass
 
@@ -527,11 +540,17 @@ class ActionRecorder:
         return self._action_index
 
     def _compute_delay(self, t: float) -> float:
-        if self._last_timestamp == 0:
-            self._last_timestamp = t
-            return 0.0
-        delay = round(t - self._last_timestamp, 3)
+        # v6.4 : le délai inter-actions est mesuré sur l'horloge monotone
+        # haute résolution (perf_counter, sous-µs), et non sur time.time()
+        # dont la granularité Windows avoisine 15 ms. On conserve cependant
+        # le timestamp epoch `t` pour l'horodatage lisible de l'action.
         self._last_timestamp = t
+        perf = winput.now()
+        if self._last_perf == 0.0:
+            self._last_perf = perf
+            return 0.0
+        delay = round(perf - self._last_perf, 4)
+        self._last_perf = perf
         return delay
 
     def _save_session(self) -> Path:
