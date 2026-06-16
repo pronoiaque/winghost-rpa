@@ -1,0 +1,26 @@
+name: Sync redesign/kpi-monitor → winghost-monitor
+
+# Pousse le contenu de redesign/kpi-monitor vers le dépôt winghost-monitor.
+# Déclenchement manuel uniquement (workflow_dispatch).
+# Nécessite un secret MONITOR_REPO_TOKEN (PAT avec scope 'repo').
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout redesign/kpi-monitor
+        uses: actions/checkout@v4
+        with:
+          ref: redesign/kpi-monitor
+          fetch-depth: 0
+
+      - name: Pousser vers winghost-monitor (main)
+        run: |
+          git config user.email "noreply@github.com"
+          git config user.name "GitHub Actions"
+          git remote add monitor \
+            https://x-access-token:${{ secrets.MONITOR_REPO_TOKEN }}@github.com/pronoiaque/winghost-monitor.git
+          git push monitor HEAD:main --force
