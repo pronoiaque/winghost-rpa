@@ -8,6 +8,35 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) — versionnag
 
 ---
 
+## [0.2.0] — 2026-06-16
+
+### Ajouté — Interface graphique Flet (logique « magnéto » v6.6.0)
+
+- **`winmonitor/gui.py`** : nouvelle IHM **Flet** reprenant la logique des boutons
+  de la v6.6.0 :
+  - **🔴 REC** bascule en **« ⏹ STOP REC »** (rouge) pendant l'enregistrement
+  - **▶️ REPLAY** bascule en **« ⏹ STOP »** (rouge) pendant le rejeu, puis revient
+  - **📝 RAPPORT** (re)génère le dashboard et l'ouvre dans le navigateur
+- **Journal « Replay live »** : chaque action rejouée décrite en langage clair et
+  en temps réel (*Clic en (x, y)*, *Saisie clavier : « … »*, *Touche « enter »*,
+  *Déplacement vers (x, y)*) avec temps de réponse visuel, icône d'ancrage
+  (🔍 template / 📌 absolu) et statut coloré (vert/orange/rouge)
+- **Accordéon « Scénarios »** repliable (sélection du scénario à rejouer)
+- Enregistrement et rejeu exécutés dans des **threads** dédiés ; arrêt coopératif
+  (`threading.Event` pour le rejeu, `Recorder.stop()` pour l'enregistrement)
+
+### Modifié
+
+- **`replayer.run()`** accepte désormais `on_action` (callback de progression) et
+  `stop_event` (arrêt propre entre deux actions) — utilisés par l'IHM
+- **CLI** : sous-commande **`gui`** ajoutée ; **sans argument, l'application ouvre
+  la GUI** (corrige le « double-clic → fenêtre noire puis rien »)
+- **`winghost-monitor.spec`** : Flet embarqué (`collect_all`), exe **fenêtré**
+  (`console=False`, plus de console DOS)
+- `flet>=0.21.0` ajouté aux dépendances (exécution et build)
+
+---
+
 ## [0.1.1] — 2026-06-15
 
 ### Ajouté — Build Windows (exécutable mono-fichier)

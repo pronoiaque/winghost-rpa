@@ -15,5 +15,8 @@ screeninfo>=0.8.1
 # Scheduler
 APScheduler>=3.10.0
 
+# Interface graphique
+flet>=0.21.0
+
 # Windows uniquement
 pywin32>=306; sys_platform == "win32"

@@ -1,14 +1,15 @@
-# WinGhost Monitor v0.1 — CHU Toulouse
+# WinGhost Monitor v0.2 — CHU Toulouse
 
 > **Supervision de la performance applicative** par RPA visuel. Rejoue des
 > scénarios métier (RDP, Win32, web/AppliDis) à intervalles réguliers et mesure
 > le **temps de réponse réel** des applications du CHU — par plage horaire, avec
-> baseline, alertes de régression et tableau de bord HTML autonome.
+> baseline, alertes de régression, **interface graphique Flet** et tableau de
+> bord HTML autonome.
 
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-0.1.1-orange)
+![Version](https://img.shields.io/badge/version-0.2.0-orange)
 
 > ℹ️ **Refonte (fork) de WinGhost RPA.** Le code historique d'enregistrement /
 > rejeu (v6.x, monolithe Tkinter) reste disponible sur la branche `main`. Ce
@@ -48,6 +49,24 @@ Scheduler                  APScheduler par plage horaire (08h-09h, 12h, 17h…) 
 
 ---
 
+## Interface graphique (Flet)
+
+Au **double-clic** sur `winmonitor.exe` (ou via `winmonitor gui`), l'application
+ouvre une fenêtre reprenant la logique « magnéto » de la v6.6.0 :
+
+| Bouton | Comportement |
+|---|---|
+| 🔴 **REC** | Lance l'enregistrement ; bascule en **⏹ STOP REC** (rouge) jusqu'à l'arrêt (bouton ou ÉCHAP) |
+| ▶️ **REPLAY** | Rejoue le scénario sélectionné ; bascule en **⏹ STOP** (rouge) puis revient |
+| 📝 **RAPPORT** | (Re)génère le dashboard HTML et l'ouvre dans le navigateur |
+
+Le panneau **« Replay live »** décrit chaque action en temps réel (clic, saisie,
+touche, déplacement) avec son **temps de réponse visuel**, l'icône d'ancrage
+(🔍 template / 📌 absolu) et un statut coloré. La liste des scénarios est un
+**accordéon repliable**.
+
+---
+
 ## Installation
 
 ```bash
@@ -63,8 +82,9 @@ mono-fichier `winmonitor.exe` est produit par GitHub Actions
 - **téléchargeable** comme artefact à chaque push (onglet *Actions*) ;
 - **publié en Release** sur tag `v*` (ex. `v0.1.1`).
 
-L'exe embarque OpenCV (ancrage visuel), pynput, MSS et APScheduler. Il expose
-la même CLI : `winmonitor.exe record|replay|schedule|dashboard|report`.
+L'exe embarque Flet (IHM), OpenCV (ancrage visuel), pynput, MSS et APScheduler.
+**Sans argument, il ouvre l'interface graphique** ; les sous-commandes CLI
+restent disponibles : `winmonitor.exe record|replay|schedule|dashboard|report`.
 
 Build local (sur Windows) :
 

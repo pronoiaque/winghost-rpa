@@ -97,7 +97,16 @@ class Replayer:
         self.injector = injector or Injector(self.current_size)
 
     # ─── API publique ──────────────────────────────────────────────────────────
-    def run(self, scenario: Scenario, scenario_dir: Path) -> RunResult:
+    def run(self, scenario: Scenario, scenario_dir: Path,
+            on_action=None, stop_event=None) -> RunResult:
+        """
+        Rejoue `scenario`.
+
+        on_action : callback optionnel appelé après chaque action avec
+                    (action, outcome) — utilisé par l'IHM pour le journal live.
+        stop_event : threading.Event optionnel ; s'il est positionné, le rejeu
+                     s'interrompt proprement entre deux actions (bouton STOP).
+        """
         scenario_dir = Path(scenario_dir)
         dpi = DpiAdapter(tuple(scenario.screen_size), self.current_size)
         result = RunResult(
@@ -107,8 +116,16 @@ class Replayer:
         )
 
         for action in scenario.actions:
+            if stop_event is not None and stop_event.is_set():
+                break
             self._respect_tempo(action.delta)
-            result.outcomes.append(self._play(action, scenario_dir, dpi))
+            outcome = self._play(action, scenario_dir, dpi)
+            result.outcomes.append(outcome)
+            if on_action is not None:
+                try:
+                    on_action(action, outcome)
+                except Exception:
+                    pass
 
         return result
 

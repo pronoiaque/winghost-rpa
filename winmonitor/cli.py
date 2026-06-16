@@ -97,11 +97,22 @@ def _cmd_fetch_chartjs(_args) -> int:
     return 0
 
 
+def _cmd_gui(_args) -> int:
+    from winmonitor.gui import run
+
+    run()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="winmonitor",
                                 description="WinGhost Monitor — supervision de performance applicative")
     p.add_argument("--version", action="version", version=f"WinGhost Monitor {__version__}")
-    sub = p.add_subparsers(dest="command", required=True)
+    # Sous-commande optionnelle : sans argument → interface graphique (GUI).
+    sub = p.add_subparsers(dest="command", required=False)
+
+    sub.add_parser("gui", help="lancer l'interface graphique (défaut)").set_defaults(
+        func=_cmd_gui)
 
     pr = sub.add_parser("record", help="enregistrer un scénario")
     pr.add_argument("name")
@@ -131,6 +142,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if getattr(args, "func", None) is None:
+        return _cmd_gui(args)        # aucun sous-commande → GUI par défaut
     return args.func(args)
 
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "winghost-monitor"
-version = "0.1.1"
+version = "0.2.0"
 description = "Supervision de la performance applicative (CHU Toulouse) : RPA visuel à 4 couches — recorder, replayer à ancrage OpenCV, chronomètre visuel + KPI SQLite, scheduler par plage horaire et dashboard HTML autonome"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -36,6 +36,7 @@ dependencies = [
     "Pillow>=10.0.0",
     "APScheduler>=3.10.0",
     "screeninfo>=0.8.1",
+    "flet>=0.21.0",
     "pywin32>=306; sys_platform == 'win32'",
 ]
 
@@ -49,6 +50,9 @@ Changelog  = "https://github.com/pronoiaque/winghost-rpa/blob/main/CHANGELOG.md"
 
 [project.scripts]
 winmonitor = "winmonitor.cli:main"
+
+[project.gui-scripts]
+winmonitor-gui = "winmonitor.gui:run"
 
 [tool.setuptools.packages.find]
 where = ["."]
