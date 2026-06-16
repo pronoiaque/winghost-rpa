@@ -25,6 +25,13 @@ sessions/
 reports/
 logs/
 
+# WinGhost Monitor — données runtime
+.winghost-monitor/
+metrics.db
+dashboard/
+fallback/
+.pytest_cache/
+
 # IDE / OS
 .vscode/
 .idea/

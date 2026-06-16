@@ -1,21 +1,21 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "winghost-rpa"
-version = "6.6.0"
-description = "Enregistreur / rejoueur RPA Windows (habillage CHU Toulouse) avec ancrage visuel OCR optionnel, tous les inputs souris, splash screen, scénarios nommés, log officiel CSV, mode automatique (systray), dashboard web et interface CustomTkinter"
+name = "winghost-monitor"
+version = "0.1.1"
+description = "Supervision de la performance applicative (CHU Toulouse) : RPA visuel à 4 couches — recorder, replayer à ancrage OpenCV, chronomètre visuel + KPI SQLite, scheduler par plage horaire et dashboard HTML autonome"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
     { name = "Olivier Bendries", email = "pronoiaque@users.noreply.github.com" }
 ]
-keywords = ["rpa", "automation", "ocr", "pyautogui", "easyocr", "windows", "recorder", "replayer"]
+keywords = ["rpa", "monitoring", "performance", "opencv", "template-matching",
+            "apscheduler", "kpi", "windows", "rdp"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Environment :: Win32 (MS Windows)",
-    "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
     "Operating System :: Microsoft :: Windows",
@@ -23,36 +23,33 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Desktop Environment",
+    "Topic :: System :: Monitoring",
     "Topic :: Software Development :: Testing",
-    "Topic :: Utilities",
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "pyautogui>=0.9.54",
-    "pynput>=1.7.6",
-    "opencv-python>=4.8.0",
-    "Pillow>=10.0.0",
     "numpy>=1.24.0",
+    "opencv-python>=4.8.0",
+    "mss>=9.0.0",
+    "pynput>=1.7.6",
+    "pyautogui>=0.9.54",
+    "Pillow>=10.0.0",
+    "APScheduler>=3.10.0",
     "screeninfo>=0.8.1",
-    "flask>=3.0.0",
-    "customtkinter>=5.2.0",
-    "pywin32>=306",
-    "psutil>=5.9.0",
-    "pystray>=0.19.4",
+    "pywin32>=306; sys_platform == 'win32'",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
 
 [project.urls]
 Homepage   = "https://github.com/pronoiaque/winghost-rpa"
 Repository = "https://github.com/pronoiaque/winghost-rpa"
 Changelog  = "https://github.com/pronoiaque/winghost-rpa/blob/main/CHANGELOG.md"
-Issues     = "https://github.com/pronoiaque/winghost-rpa/issues"
 
 [project.scripts]
-winghost-record = "recorder:main"
-winghost-replay = "replayer:main"
-winghost-gui    = "gui:main"
+winmonitor = "winmonitor.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["winghost*"]
+include = ["winmonitor*"]

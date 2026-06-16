@@ -1,34 +1,22 @@
 # ─── Dépendances du BINAIRE Windows (PyInstaller) ────────────────────────────
-# EasyOCR/torch supprimés en v6.6 → remplacés par opencv-python-headless.
-# La localisation dynamique (template matching OpenCV) est incluse dans le build.
+# Contrairement au build « léger » v6.x, OpenCV est EMBARQUÉ : l'ancrage visuel
+# (matchTemplate) est au cœur de la Couche 2, il n'est plus optionnel.
+# Version headless d'OpenCV : pas de dépendances GUI Qt inutiles dans l'exe.
 
-# Automatisation bureau
-pyautogui>=0.9.54
-pynput>=1.7.6
-
-# Traitement image + template matching (remplace EasyOCR/torch)
-Pillow>=10.0.0
+# Couches 1 & 2 — capture, ancrage visuel, injection
 numpy>=1.24.0
 opencv-python-headless>=4.8.0
-
-# Détection multi-moniteurs
+mss>=9.0.0
+pynput>=1.7.6
+pyautogui>=0.9.54
+Pillow>=10.0.0
 screeninfo>=0.8.1
 
-# Dashboard web
-flask>=3.0.0
+# Scheduler
+APScheduler>=3.10.0
 
-# Interface graphique moderne
-customtkinter>=5.2.0
-
-# Capture du nom d'application Windows en premier plan
+# Windows
 pywin32>=306
-psutil>=5.9.0
 
-# Icône de zone de notification (mode automatique)
-pystray>=0.19.4
-
-# Backend clavier de secours (hook bas niveau WH_KEYBOARD_LL)
-keyboard>=0.13.5
-
-# Outil d'empaquetage
+# Empaquetage
 pyinstaller>=6.3.0

@@ -1,52 +1,53 @@
-# WinGhost RPA — Instructions Claude Code
+# WinGhost Monitor — Instructions Claude Code
 
-## Règle systématique : tout push doit mettre à jour CHANGELOG.md et README.md
+> Refonte (fork) de WinGhost RPA. Architecture en 4 couches centrée sur la
+> **mesure de performance applicative** (cf. README). Le monolithe v6.x reste
+> sur `main`.
 
-À chaque commit/push vers le dépôt, **sans exception** :
+## Règle systématique : tout push met à jour les 4 fichiers de version
+
+À chaque commit/push, **sans exception** :
 
 1. **`version.py`** — SOURCE UNIQUE de la version : bumper `__version__ = "X.Y.Z"`.
-   L'IHM (titre, splash, bandeau) et le débug lisent cette valeur — ne JAMAIS
-   remettre un numéro de version en dur dans `gui.py`.
-
-2. **CHANGELOG.md** — ajouter une section `## [X.Y.Z] — YYYY-MM-DD` avec :
-   - Sous-sections claires (### Ajouté / Modifié / Corrigé)
-   - Description des changements en français
-   - Détails techniques si pertinents
-
-3. **README.md** — mettre à jour :
-   - Le numéro de version dans le titre et le badge `![Version]`
-   - La section « Nouveautés vX.Y » si c'est une nouvelle version mineure/majeure
-   - Toute documentation affectée par les changements
-
+2. **CHANGELOG.md** — ajouter une section `## [X.Y.Z] — YYYY-MM-DD` (Ajouté /
+   Modifié / Corrigé, en français).
+3. **README.md** — mettre à jour le badge `![Version]` et la doc affectée.
 4. **pyproject.toml** — bumper `version = "X.Y.Z"` (DOIT être identique à
-   `version.py`, sinon le build CI échoue sur l'étape de cohérence).
+   `version.py`, sinon la CI échoue sur `tools/check_version.py`).
 
-Ces quatre fichiers doivent **toujours être inclus dans le même commit** que les
-modifications de code.
+Ces quatre fichiers doivent **toujours être dans le même commit** que le code.
 
-## Build automatique du binaire
+## Architecture (ne pas mélanger les couches)
 
-Le workflow `.github/workflows/build-windows.yml` se déclenche **automatiquement
-à chaque push sur `main`** et produit l'artefact `WinGhost-windows-x64`
-(WinGhost.exe). Il n'y a donc rien à faire manuellement : pousser sur `main`
-suffit. Un tag `v*` publie en plus une Release GitHub avec l'exe attaché.
+```
+winmonitor/
+  recorder/   Couche 1 — pynput + MSS → scénario JSON + ancres visuelles
+  replayer/   Couche 2 — matchTemplate OpenCV + DPI/RDP + injection + retry/fallback
+  kpi/        Couche 3 — chronomètre visuel + SQLite + baseline + dashboard
+  scheduler/  APScheduler par plage horaire → rapport quotidien
+  cli.py      point d'entrée unique `winmonitor`
+```
 
-Workflow de release type :
-1. Bumper `version.py` + `pyproject.toml`, MAJ `CHANGELOG.md` + `README.md`
-2. Commit + push sur la branche de dev, puis fast-forward `main`
-3. Le build se lance tout seul → récupérer l'exe dans l'onglet Actions
+Principe directeur : **la mesure de perf = chronomètre visuel** (`t_action →
+écran stable`), jamais le temps d'injection des entrées.
+
+## Conventions
+
+- Constantes/seuils/chemins centralisés dans `winmonitor/config.py` (pas de
+  valeur magique dispersée).
+- Imports lourds (cv2, pynput, mss, apscheduler) **paresseux** dans les fonctions
+  quand un import au niveau module empêcherait l'exécution headless.
+- Tests sans IHM dans `tests/` (doivent passer sur Linux CI sans écran/OpenCV).
 
 ## Branche de développement
 
-Développement sur `claude/exciting-noether-8bqv7r`, push via :
+Développement sur `redesign/kpi-monitor`, push via :
 ```
-git push -u origin claude/exciting-noether-8bqv7r
+git push -u origin redesign/kpi-monitor
 ```
 
-## Conventions de commit
+## Format de commit
 
-Format : `type(scope): description courte`
-- `feat(vX.Y)` — nouvelle fonctionnalité
-- `fix(vX.Y)` — correction de bug
-- `build` — packaging, CI, spec PyInstaller
-- `docs` — documentation seule
+`type(scope): description courte`
+- `feat(couche1|couche2|couche3|scheduler)` — fonctionnalité
+- `fix(...)` — correction · `docs` — doc seule · `build` — CI/packaging · `test`

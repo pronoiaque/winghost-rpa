@@ -1,447 +1,130 @@
-# WinGhost RPA v6.6 — CHU Toulouse
+# WinGhost Monitor v0.1 — CHU Toulouse
 
-> Enregistreur / Rejoueur RPA Windows **aux couleurs du CHU de Toulouse**, avec localisation dynamique par **template matching OpenCV** (remplace EasyOCR), capture de tous les inputs souris (clics, molette, glisser), enregistrement des mouvements, splash screen de démarrage, mode automatique planifié (systray), scénarios nommés, log officiel CSV, screenshots systématiques, dashboard web dynamique et interface CustomTkinter moderne.
+> **Supervision de la performance applicative** par RPA visuel. Rejoue des
+> scénarios métier (RDP, Win32, web/AppliDis) à intervalles réguliers et mesure
+> le **temps de réponse réel** des applications du CHU — par plage horaire, avec
+> baseline, alertes de régression et tableau de bord HTML autonome.
 
 ![License MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Windows](https://img.shields.io/badge/os-Windows-lightgrey)
-![Version](https://img.shields.io/badge/version-6.6.0-green)
+![Version](https://img.shields.io/badge/version-0.1.1-orange)
+
+> ℹ️ **Refonte (fork) de WinGhost RPA.** Le code historique d'enregistrement /
+> rejeu (v6.x, monolithe Tkinter) reste disponible sur la branche `main`. Ce
+> projet repart d'une architecture propre en 4 couches centrée sur la **mesure
+> de performance**, et non plus seulement l'automatisation.
 
 ---
 
-## Nouveautés v6.6 — Localisation dynamique OpenCV (suppression EasyOCR)
+## Pourquoi cette refonte ?
 
-| Changement | Description |
-|---|---|
-| 🔍 **Template matching multi-échelle** | EasyOCR et PyTorch (~1 Go) sont **supprimés définitivement**. La relocalisation visuelle utilise désormais `cv2.matchTemplate` (TM_CCOEFF_NORMED) en cascade multi-échelle 0.80×–1.20×, avec recherche locale ±400 px puis plein écran en repli |
-| 🌐 **Compatible RDP / AppliDis / Win32 / Web** | Le matching opère sur les **pixels rendus côté client**, indépendant du protocole de transport (RDP compressé, applications Win32 natives, navigateurs web) |
-| 📌 **Repli absolu garanti** | Si aucun template n'est disponible ou si la confiance est insuffisante, les **coordonnées enregistrées** sont utilisées directement — le rejeu ne bloque jamais |
-| 🎛️ **Nouveau panneau Options** | Case « Localisation dynamique (vision) » + curseur **Confiance** (0.50–1.0, défaut 0.75) ; grisé si OpenCV est absent |
-| 🏗️ **Build plus léger** | Sans EasyOCR/torch, le binaire passe de ~1,5 Go à quelques dizaines de Mo |
+La v6.x rejouait fidèlement souris **et** clavier, mais le moteur clavier
+« hésitait » avant chaque frappe (cascade de backends + forçage de focus) — ce
+qui **polluait toute mesure de temps de réponse**.
 
----
-
-## Nouveautés v6.5 — Ergonomie & journal de rejeu lisible
-
-| Changement | Description |
-|---|---|
-| ⏹ **REPLAY ↔ STOP** | Le bouton STOP autonome disparaît : pendant un replay, **REPLAY devient ⏹ STOP** (rouge) puis revient à ▶️ REPLAY. La barre de transport tient sur une seule rangée (🔴 REC · ▶️ REPLAY/STOP · 📝 RAPPORT) |
-| 📂 **Scénarios repliables** | La liste des scénarios devient un **accordéon** que l'on ouvre/ferme d'un clic, pour libérer de l'espace dans la colonne de gauche |
-| 📖 **Journal « Replay live »** | Nouvel onglet décrivant **en temps réel et en langage clair** chaque action rejouée (*« Clic sur « Calculatrice » »*, *« Saisie clavier : « 12+34 » »*, *« Déplacement de la souris vers (840, 512) »*), avec statut (✔/⚠/✘) et temps de réponse |
-| 💬 **Bulles d'aide sur les onglets** | Journal / Rapport / Stats long-terme expliquent leur contenu au survol |
+La parade architecturale : **on ne chronomètre plus l'injection des entrées**.
+On mesure le temps que met **l'écran à se stabiliser** après une action
+(*chronomètre visuel* : `t_action → écran stable`). C'est la vraie réactivité
+de l'application, indépendante de la vitesse du clavier/souris.
 
 ---
 
-## Nouveautés v6.4 — Précision des entrées
-
-| Correctif | Description |
-|---|---|
-| 🔬 **Trace multi-contextuelle** | Journal `…/debug/winghost_trace.log` qui capture, à l'enregistrement ET au rejeu, ce qui est tapé et **vers quelle fenêtre** part chaque frappe (premier plan + contrôle focalisé avant/après le clic) |
-| 🎯 **Focus forcé au rejeu** | Après le clic d'une saisie, la fenêtre cible est **forcée au premier plan** avant injection → corrige les frappes perdues quand le focus ne suit pas |
-| ⌨️ **Backend `keyboard` (boppreh)** | Ajouté à la chaîne d'injection (SendInput → pynput → keyboard → pyautogui) |
-| 🎛️ **Barre « magnéto » 800×600** | 🔴 REC (rouge) · ▶️ REPLAY · ⏹️ STOP · 📝 RAPPORT en gros boutons ; réglages dans une zone défilante ; fenêtre tient en 800×600 |
-| 🔢 **Pavé numérique** | Les chiffres tapés au pavé numérique (`VK_NUMPAD`) sont désormais correctement enregistrés et rejoués (corrige les saisies de nombres perdues) ; rejeu rétro-compatible des anciens scénarios `<NN>` |
-| 🎯 **Fin de la dérive de la souris** | Le processus devient *per-monitor DPI-aware* (`winput.enable_dpi_awareness()`) : enregistrement (pixels physiques) et rejeu visent le **même repère**, même avec un affichage à 125 %/150 %. Les déplacements ciblent les coordonnées **exactes** (`MINIMUM_DURATION = 0`) |
-| ⌨️ **Saisie clavier fiable (AZERTY + accents)** | Fin des touches « jamais tapées ». Cause racine : `pyautogui` rejoue via des codes de touches **QWERTY** → sur un clavier **français AZERTY** les lettres sont permutées et les accents abandonnés. La saisie passe désormais par **`SendInput` / `KEYEVENTF_UNICODE`** (codepoint Unicode exact, **indépendant de la disposition**), avec repli pynput puis pyautogui |
-| ⏱️ **Délais à la milliseconde** | Cadence mesurée sur `time.perf_counter()` (sous-µs) au lieu de `time.time()` (~15 ms sous Windows) → rejeu fidèle au tempo enregistré |
-| 🔎 **Vérification clavier dans les rapports** | Chaque saisie consigne **caractères émis / attendus** ; avertissement explicite si incomplet (logs) + nouvelle colonne **« Clavier »** (`✔ n/m`) dans le rapport HTML |
-| 🐞 **Bouton « Débug dev »** | Diagnostic complet (disposition AZERTY, privilèges **UIPI**, DPI, moteurs d'injection + code retour `SendInput`, **auto-test de frappe** en direct, inspection du scénario) — l'outil pour identifier *pourquoi* une saisie n'aboutit pas sur un poste donné |
-
----
-
-## Nouveautés v6.3
-
-| Fonctionnalité | Description |
-|---|---|
-| 🔓 **Vérification visuelle OCR optionnelle** | Le rejeu conditionné à l'OCR (« ne rejouer que si le contexte visuel correspond ») devient une **option décochée par défaut** : case **« Vérifier le contexte visuel (OCR) »** dans *Options replay* |
-| ⚡ **Rejeu direct par défaut** | Sans la case cochée, **toutes les actions sont rejouées sans contrôle OCR** → plus rapide, plus robuste, plus de clics « sautés ». EasyOCR n'est pas sollicité ; le seuil OCR est grisé tant que l'option est décochée |
-
----
-
-## Nouveautés v6.2
-
-| Fonctionnalité | Description |
-|---|---|
-| 🎨 **Thème clair CHU Toulouse** | Interface claire institutionnelle : bleu CHU `#0091CE`, vert `#8BC53F`, texte ardoise `#1E2A38`, fonds blanc / `#EDF2F8` — bandeau supérieur bleu CHU |
-| 🐚 **Logo coquille CHU** | Logo « coquille Saint-Jacques » en dégradé bleu→vert (`chu_logo.py` + `assets/logo_chu.svg`), affiché dans l'en-tête, le splash, l'icône de fenêtre et le systray |
-
-> ⚠️ Le logo est une **reconstruction libre** inspirée de l'identité du CHU de Toulouse (la charte officielle n'ayant pu être récupérée automatiquement). Pour un usage officiel, remplacez `assets/logo_chu.svg` / `assets/logo_chu.png` par le fichier de la direction de la communication ; la palette est ajustable dans `chu_logo.COLORS` et l'en-tête de `gui.py`.
-
----
-
-## Nouveautés v6.1
-
-| Fonctionnalité | Description |
-|---|---|
-| 🖱️ **Tous les inputs souris** | Le recorder capture désormais le **clic milieu** (`middle_click`), la **molette** (`scroll`) et le **glisser-déposer** (`drag`) — en plus des clics gauche/droit, double-clics et mouvements |
-| 🐛 **Clics rejoués de façon fiable** | Correction du symptôme « la souris bouge mais ne clique pas » : seuil OCR par défaut abaissé à **0.25** (était 0.40) pour éviter les faux négatifs qui faisaient sauter les clics, tout en conservant le gate OCR strict |
-
----
-
-## Nouveautés v6
-
-| Fonctionnalité | Description |
-|---|---|
-| 🖱️ **Mouvements souris enregistrés** | Le recorder consigne désormais les déplacements du curseur (action `move`), throttlés (10 FPS max, 15 px min) pour un rejeu fidèle de la trajectoire |
-| 🎯 **Rejeu conditionné à l'OCR** | Les clics et saisies ne sont rejoués **que si** le contexte visuel correspond (score OCR ≥ seuil) ; les `move` sont exécutés directement, sans vérification |
-| ⏳ **Splash screen de démarrage** | Écran d'accueil avec barre de progression pendant le chargement d'EasyOCR (long à initialiser) — la fenêtre principale n'apparaît qu'une fois prêt |
-| ♻️ **Lecteur OCR partagé** | EasyOCR n'est initialisé qu'**une seule fois** au démarrage puis réutilisé par le recorder et le replayer (gain de temps notable) |
-
----
-
-## Nouveautés v5
-
-| Fonctionnalité | Description |
-|---|---|
-| 🔁 **Mode automatique** | Rejoue un scénario en boucle à intervalle régulier (**30 min par défaut**) — répond à la spec « tourner toutes les 30 mins » |
-| 📥 **Réduction en systray** | Pendant l'automatique, la fenêtre se réduit dans la zone de notification ; un clic sur l'icône la restaure |
-| 🚨 **Alerte sur échec** | Gros popup rouge plein écran dès qu'un cycle se solde par un `ÉCHEC`, avec le détail des actions fautives |
-| 🎯 **Application cible** | Champ texte où l'on saisit le nom de l'application visée — inscrit tel quel dans le journal officiel |
-| ⏱️ **Deux métriques de temps** | Dashboard : **bout-en-bout** (horloge réelle) **et applicatif cumulé** (réactivité pure), chacune avec une bulle d'aide explicative |
-
----
-
-## Nouveautés v4
-
-| Fonctionnalité | Description |
-|---|---|
-| 🎨 **Interface CustomTkinter** | UI moderne et arrondie remplaçant Tkinter — thème dark cohérent, bulles d'aide (tooltips) sur tous les contrôles |
-| 🗂️ **Gestion des scénarios** | Renommer, supprimer directement depuis la liste — fichiers sauvegardés dans `scenarios/` |
-| 📋 **Log officiel CSV** | Fichiers mensuels `logs/official_YYYYMM.csv` : application, scénario, date, durée, statut |
-| 🪵 **Log debug séparé** | Journal technique (actions, OCR, erreurs) accessible via sous-onglet — log officiel affiché en premier plan |
-| 📸 **Screenshots systématiques** | Capture 160 px autour de chaque clic/saisie, toujours active — plus d'option à cocher |
-| 🖥️ **Nom d'application capturé** | Processus Windows en premier plan enregistré pour chaque action (via pywin32 / psutil) |
-| 📊 **Stats temps réel** | Onglet Stats long-terme corrigé : actualisation automatique après replay et au changement d'onglet |
-
----
-
-## Fonctionnement
-
-### 1. Enregistrement (`recorder.py`)
-
-L'outil écoute **tous les inputs** souris et clavier via **pynput** : clics gauche / droit / **milieu**, double-clics, **molette** (`scroll`), **glisser-déposer** (`drag`), déplacements du curseur (`move`, throttlé à 10 FPS / 15 px) et saisies clavier. À chaque clic ou saisie :
-
-1. Capture du **nom de l'application** active (processus Windows via pywin32 + psutil)
-2. Screenshot de la région autour du curseur (±160 px, multi-moniteurs)
-3. Reconnaissance OCR (EasyOCR, fr + en) — déduction d'un **label humain** (`"Connexion"`, `"Champ mot de passe"`)
-4. Sauvegarde dans `scenarios/scenario_YYYYMMDD_HHMMSS.json` (v3.0, rétrocompatible v1/v2)
-
-> EasyOCR est initialisé **une seule fois** au démarrage (pendant le splash screen) puis partagé entre le recorder et le replayer.
-
-### 2. Replay simple (`ActionReplayer`)
-
-Pour chaque action enregistrée :
-
-1. **Vérification OCR — optionnelle (v6.3, décochée par défaut)** : si la case **« Vérifier le contexte visuel (OCR) »** est cochée, le contexte visuel actuel est comparé à celui enregistré (score `difflib`) et l'action est ignorée si le score est sous le seuil. **Par défaut (case décochée), cette étape est ignorée** et toutes les actions sont rejouées
-2. **Exécution** via PyAutoGUI (les `move` sont rejoués directement via `moveTo`, sans vérification ni mesure de réponse)
-3. **Screenshot post-action** : PNG base64 de la région (160 px) autour du clic — toujours capturé
-4. **Mesure du temps de réponse** : polling pixel-à-pixel jusqu'au prochain changement d'écran
-
-> 💡 **Quand activer le gate OCR ?** Cochez la case si l'interface cible peut bouger entre l'enregistrement et le rejeu (fenêtres déplacées, contenu dynamique) et que vous voulez éviter de cliquer « à l'aveugle ». Laissez-la décochée pour un rejeu rapide et déterministe sur une interface stable (cas le plus courant).
-
-### 3. Multi-run (`MultiReplayRunner`)
-
-Lance N fois la même session, avec pause configurable entre les runs. Chaque run est :
-- persisté individuellement en base SQLite (`winghost_stats.db`)
-- consigné dans le log officiel CSV (`logs/official_YYYYMM.csv`)
-
-Cela permet d'analyser :
-- La **tendance** du temps de réponse au fil des runs
-- Les **pics de lag** par heure de la journée (heatmap horaire)
-- Le **taux de succès** par bouton/label sur la durée
-
-### 4. Log officiel
-
-Chaque replay (simple ou multi) ajoute une entrée dans `logs/official_YYYYMM.csv` :
+## Architecture en 4 couches
 
 ```
-app_name;scenario_name;execution_date;duration_s;status;ok_count;total_count;run_id
-MonApp;Connexion admin;2026-06-12T14:32:00;8.3;SUCCÈS;12;12;42
+Couche 1 — Recorder        pynput (souris/clavier) + MSS (screenshots) → scénario JSON + ancres visuelles
+Couche 2 — Replayer        ancrage OpenCV matchTemplate + adaptateur DPI/RDP + retry/timeout/fallback
+Couche 3 — KPI Collector   chronomètre visuel (t_action → écran stable) + store SQLite (UTC) + dashboard HTML
+Scheduler                  APScheduler par plage horaire (08h-09h, 12h, 17h…) → agrégation → rapport quotidien
 ```
 
-| Statut | Critère |
-|---|---|
-| `SUCCÈS` | 100 % des actions OK |
-| `PARTIEL` | ≥ 1 action ignorée, aucune erreur |
-| `ÉCHEC` | ≥ 1 erreur |
-
-### 5. Rapports
-
-| Format | Contenu | Emplacement |
+| Couche | Module | Rôle |
 |---|---|---|
-| **JSON** | Détail complet sans screenshots (léger et lisible) | `reports/report_*.json` |
-| **HTML** | Graphique SVG + tableau + screenshots inline, thème sombre | `reports/report_*.html` |
-| **Dashboard web** | Graphiques Chart.js dynamiques depuis la DB SQLite | `http://127.0.0.1:5000/` |
-| **CSV** | Tous les runs d'une session (run_number, label, ms, statut…) | Export via GUI ou dashboard |
-| **Log officiel** | Historique mensuel des exécutions par app/scénario | `logs/official_YYYYMM.csv` |
+| 1 | `winmonitor/recorder/` | `listener.py` (hooks pynput), `screenshot.py` (MSS), `scenario.py` (modèle JSON + ancres) |
+| 2 | `winmonitor/replayer/` | `anchor.py` (matchTemplate multi-échelle), `dpi.py` (facteur d'échelle RDP/DPI), `injector.py` (SendInput rapide), `replayer.py` (orchestration retry/fallback) |
+| 3 | `winmonitor/kpi/` | `chrono.py` (chronomètre visuel), `store.py` (SQLite), `baseline.py` (médiane/p95 + régression), `dashboard.py` (HTML/Chart.js) |
+| — | `winmonitor/scheduler/` | `runner.py` (APScheduler), `report.py` (rapport quotidien) |
 
 ---
 
 ## Installation
 
 ```bash
-# Cloner
-git clone https://github.com/pronoiaque/winghost-rpa.git
-cd winghost-rpa
-
-# Environnement virtuel (recommandé)
-python -m venv .venv
-.venv\Scripts\activate       # Windows
-
-# Dépendances
-pip install -r requirements.txt
+pip install -r requirements.txt          # ou : pip install -e .
 ```
 
-> **Windows uniquement** : `pywin32` et `psutil` capturent le nom de l'application active ; `screeninfo` clippe les screenshots aux limites de chaque moniteur ; `pystray` gère l'icône de zone de notification du mode automatique. Toutes sont des dépendances standard.
+### Exécutable Windows (sans Python)
 
----
+Pour un déploiement sur poste CHU sans installation Python, un binaire
+mono-fichier `winmonitor.exe` est produit par GitHub Actions
+(`.github/workflows/build-windows.yml`, PyInstaller sur `windows-latest`) :
 
-## Binaire Windows (`.exe`)
+- **téléchargeable** comme artefact à chaque push (onglet *Actions*) ;
+- **publié en Release** sur tag `v*` (ex. `v0.1.1`).
 
-Un **exécutable unique x64** (`WinGhost.exe`) peut être produit avec PyInstaller — aucune installation de Python requise sur la machine cible.
+L'exe embarque OpenCV (ancrage visuel), pynput, MSS et APScheduler. Il expose
+la même CLI : `winmonitor.exe record|replay|schedule|dashboard|report`.
 
-### Build automatique (recommandé)
+Build local (sur Windows) :
 
-Le workflow **`.github/workflows/build-windows.yml`** compile le binaire sur un runner `windows-latest` :
-
-- **Manuellement** : onglet *Actions* → *Build Windows x64* → *Run workflow* → l'exe est téléchargeable en **artefact**
-- **Sur release** : pousser un tag `v*` (ex. `git tag v6.3.0 && git push --tags`) → l'exe est attaché à la **Release** GitHub
-
-### Build local (sur une machine Windows x64)
-
-```bat
+```powershell
 pip install -r requirements-build.txt
-pyinstaller --noconfirm --clean winghost.spec
-:: => dist\WinGhost.exe
+pyinstaller --noconfirm --clean winghost-monitor.spec
+.\dist\winmonitor.exe --version
 ```
-
-> ⚙️ **Build léger (~200 Mo)** : EasyOCR / PyTorch sont **exclus** du binaire. L'ancrage visuel OCR étant optionnel et décoché par défaut (v6.3), le RPA pur fonctionne tel quel ; cocher « Vérifier le contexte visuel (OCR) » affiche alors un message indiquant que l'OCR n'est pas embarqué.
->
-> Pour une **build complète avec OCR** (~1,5–2,5 Go), retirer `torch`/`torchvision`/`easyocr` des `excludes` de `winghost.spec` et installer ces paquets avant le build.
->
-> 🚫 **PyInstaller ne cross-compile pas** : le binaire Windows doit être généré **sur Windows** (d'où le runner CI). La cible **32 bits (i386/win32) n'est pas supportée** (PyTorch n'a plus de wheels 32 bits) — **x64 uniquement**.
-
-Données d'exécution (`scenarios/`, `reports/`, `logs/`, `winghost_stats.db`) : écrites **à côté de l'exe** si le dossier est inscriptible, sinon dans `%APPDATA%\WinGhost`.
-
----
 
 ## Utilisation
 
-### Interface graphique (recommandé)
-
-```bat
-winghost.bat
-# ou
-python gui.py
-```
-
-### Workflow typique
-
-1. Saisissez un **nom de scénario** et, optionnellement, le **nom de l'application cible**
-2. Cliquez **RECORD** → effectuez votre scénario → **STOP RECORD**
-3. La session apparaît dans la liste des scénarios
-4. Réglez le **nombre de répétitions** (1–99) et l'**intervalle** entre les runs (secondes)
-5. *(Optionnel)* Cochez **« Vérifier le contexte visuel (OCR) »** pour n'exécuter chaque clic/saisie que si l'écran correspond à l'enregistrement (réglez alors le **seuil OCR**). **Décoché par défaut** → rejeu direct sans vérification
-6. Cliquez **REPLAY** → WinGhost exécute, mesure, persiste tout en DB et log officiel
-7. Consultez l'onglet **Journal** (officiel en 1er, debug en sous-onglet) ou **Stats long-terme**
-8. Renommez ou supprimez un scénario via les boutons ✎ / 🗑 dans la liste
-
-### Mode automatique (surveillance planifiée)
-
-1. Sélectionnez le scénario à surveiller
-2. Réglez l'**intervalle en minutes** (par défaut **30**, conformément à la spec métier)
-3. Cliquez **⏱ Démarrer l'automatique** → WinGhost rejoue le scénario en boucle
-4. La fenêtre se **réduit dans la zone de notification** (systray) ; un clic sur l'icône la restaure
-5. À chaque cycle : persistance DB + ligne dans le journal officiel
-6. En cas d'**échec**, un **gros popup rouge** s'affiche avec le détail des actions fautives
-
-### Gestion des scénarios
-
-- **Renommer** (✎) : met à jour le fichier JSON et la base SQLite
-- **Supprimer** (🗑) : supprime le fichier après confirmation — irréversible
-
-### Ligne de commande
-
 ```bash
-# Enregistrer (avec nom et application cible)
-python recorder.py --name="Connexion O" --app="Outlook"
+# 1. Enregistrer un scénario (souris/clavier ; ÉCHAP pour terminer)
+winmonitor record ouverture_dossier_patient
 
-# Rejouer la dernière session (1 fois) — sans vérification OCR (défaut v6.3)
-python replayer.py
+# 2. Le rejouer une fois et mesurer le temps de réponse
+winmonitor replay ouverture_dossier_patient
 
-# Rejouer une session précise 5 fois avec 30 s d'intervalle
-python replayer.py scenarios/scenario_20260612_143200.json --runs=5 --interval=30
+# 3. Planifier les mesures par plage horaire (+ rapport quotidien à 20h)
+winmonitor schedule
 
-# Activer la vérification visuelle OCR (gate strict) — optionnel
-python replayer.py scenarios/scenario_20260612_143200.json --visual-gate
+# 4. (Re)générer le tableau de bord et le rapport
+winmonitor dashboard
+winmonitor report 2026-06-15
 
-# Mode automatique : rejouer en boucle toutes les 30 min (Ctrl+C pour arrêter)
-python scheduler.py scenarios/scenario_20260612_143200.json --interval-min=30
-
-# Mode automatique AVEC vérification OCR
-python scheduler.py scenarios/scenario_20260612_143200.json --interval-min=30 --visual-gate
-
-# Dashboard web seul (sans GUI)
-python report_server.py [--port=8080]
+# Dashboard 100 % hors-ligne : récupérer Chart.js une seule fois
+winmonitor fetch-chartjs
 ```
+
+Les données vivent sous `~/.winghost-monitor/` (surchargé par `WINMONITOR_HOME`) :
+`scenarios/`, `metrics.db` (SQLite), `dashboard/index.html`, `reports/`, `fallback/`.
 
 ---
 
-## Dashboard web
+## Mesure du temps de réponse (chronomètre visuel)
 
-Lancez depuis le GUI (**🌐 Dashboard Web**) ou directement :
+1. Juste avant de déclencher l'action, on relève `t_action`.
+2. On capture l'écran en boucle (toutes les 50 ms).
+3. Tant que deux captures diffèrent (diff. moyenne de pixels > seuil), l'appli
+   « répond ». Dès que l'écran reste identique sur N images → **stable**.
+4. **Temps de réponse = dernier changement − t_action.**
 
-```bash
-python report_server.py
-# → http://127.0.0.1:5000/
-```
-
-| URL | Description |
-|---|---|
-| `/` | Liste des sessions : runs, avg global, dernier run |
-| `/session/<id>` | Tendance avg/max par run · heatmap horaire · stats par bouton · historique |
-| `/run/<id>` | Détail d'un run : actions, statuts, screenshots, temps de réponse |
-| `/api/session/<id>/export.csv` | Téléchargement CSV brut |
-| `/api/session/<id>/data` | Données JSON (intégration externe) |
-| `/api/run/<id>/data` | Données JSON d'un run |
+Le seuil de stabilité, l'intervalle de capture et le timeout sont réglables
+dans `winmonitor/config.py`.
 
 ---
 
-## Structure du projet
+## Robustesse RDP / Win32 / Web
 
-```
-winghost-rpa/
-├── recorder.py          # Enregistreur (pynput + EasyOCR + app_name + label OCR)
-├── replayer.py          # Rejoueur : simple, multi-run, screenshots, persistance DB + log officiel
-├── stats_db.py          # Couche SQLite : sessions / runs / action_results
-├── official_log.py      # Log officiel CSV mensuel (app, scénario, durée, statut)
-├── scheduler.py         # Mode automatique (daemon) : rejoue en boucle toutes les N min
-├── report_server.py     # Dashboard Flask (Chart.js, export CSV, 2 métriques de temps)
-├── gui.py               # Interface CustomTkinter v6.2 (thème clair CHU + logo + splash + systray)
-├── chu_logo.py          # Logo coquille CHU (SVG + rendu Pillow), palette CHU
-├── requirements.txt     # Dépendances pip
-├── pyproject.toml       # Métadonnées du projet
-├── winghost.bat         # Lanceur Windows
-├── install.bat          # Installateur pip
-├── assets/              # Logo CHU (logo_chu.svg / logo_chu.png)
-├── scenarios/           # Scénarios JSON enregistrés (v4)
-├── sessions/            # Sessions JSON v1/v2 (rétrocompatibilité)
-├── reports/             # Rapports JSON + HTML par run
-├── logs/                # Logs officiels CSV mensuels (official_YYYYMM.csv)
-└── winghost_stats.db    # Base SQLite (créée automatiquement au premier replay)
-```
-
----
-
-## Format de scénario (JSON v3)
-
-```json
-{
-  "version": "3.0",
-  "scenario_name": "Connexion admin",
-  "target_app": "Outlook",
-  "recorded_at": "20260612_143200",
-  "action_count": 12,
-  "actions": [
-    {
-      "index": 1,
-      "action_type": "move",
-      "timestamp": 1749730319.5,
-      "x": 820, "y": 400,
-      "delay_before": 0.12
-    },
-    {
-      "index": 2,
-      "action_type": "click",
-      "timestamp": 1749730320.0,
-      "x": 850, "y": 420,
-      "button": "left",
-      "delay_before": 1.234,
-      "app_name": "MonApplication",
-      "visual_context": {
-        "ocr_text": "Connexion | Identifiant | Mot de passe",
-        "label": "Connexion",
-        "screenshot_region": [770, 340, 160, 160]
-      }
-    }
-  ]
-}
-```
-
-> `target_app` (v5) est facultatif : s'il est renseigné, il prime sur le nom d'application détecté automatiquement dans le journal officiel.
-> Les sessions v1 (`"1.0"`) et v2 (`"2.0"`) restent entièrement compatibles avec le replayer.
-> Les scénarios v6 incluent des actions `"move"` (mouvements souris) sans `visual_context` — rétrocompatibles avec les anciens replayers (action inconnue ignorée).
-
----
-
-## Schéma SQLite (`winghost_stats.db`)
-
-```
-sessions        id · name · scenario_name · filepath · action_count · created_at
-runs            id · session_id · run_number · started_at · ended_at
-                total · ok_count · skip_count · error_count
-                avg_response_ms · max_response_ms
-                total_duration_s   ← temps bout-en-bout (horloge réelle)
-                app_response_ms    ← temps applicatif cumulé (somme des réponses)
-action_results  id · run_id · action_index · action_type · label · app_name · x · y
-                ocr_score · visual_ok · response_time_ms · status
-                error_msg · screenshot_b64 · replayed_at
-```
-
-### Deux métriques de temps
-
-| Métrique | Définition | Où la voir |
-|---|---|---|
-| **Bout-en-bout** (`total_duration_s`) | Durée d'horloge réelle entre la 1ʳᵉ et la dernière action — inclut pauses et attentes applicatives. C'est la valeur du journal officiel. | Dashboard (carte + colonne), bulle d'info |
-| **Applicatif cumulé** (`app_response_ms`) | Somme des temps de réponse mesurés après chaque action — réactivité pure de l'application. | Dashboard (carte + colonne), bulle d'info |
-
----
-
-## Log officiel (`logs/official_YYYYMM.csv`)
-
-Fichiers mensuels (un par mois), UTF-8 BOM (compatible Excel), séparateur `;`.
-
-```
-app_name;scenario_name;execution_date;duration_s;status;ok_count;total_count;run_id
-MonApp;Connexion admin;2026-06-12T14:32:00;8.3;SUCCÈS;12;12;42
-MonApp;Connexion admin;2026-06-12T15:00:05;9.1;PARTIEL;11;12;43
-```
-
----
-
-## Rapport HTML — aperçu
-
-Chaque rapport HTML standalone inclut :
-
-- **6 cartes** résumé : Total, OK, Ignorées, Erreurs, Avg réponse, Max réponse
-- **Graphique SVG** : barres par action (🟦 OK / 🟨 ignoré / 🟥 erreur), ligne de moyenne en tirets
-- **Tableau complet** : `#`, `Type`, `Cible`, `App`, `Score OCR`, `Visuel OK`, `Réponse (s)`, `Screenshot`, `Statut`
-- **Screenshots** inline : miniatures 48 px, zoom ×3.5 au survol de la souris
-
----
-
-## Dépendances
-
-| Package | Usage |
-|---|---|
-| `pyautogui` | Contrôle souris/clavier + screenshots |
-| `pynput` | Écoute des événements natifs |
-| `easyocr` | OCR français + anglais |
-| `Pillow` | Traitement d'images |
-| `numpy` | Comparaison pixel-à-pixel |
-| `customtkinter` | Interface graphique moderne (v4) |
-| `flask` | Dashboard web dynamique |
-| `pystray` | Icône de zone de notification du mode automatique (v5) |
-| `pywin32` | Capture du nom d'application Windows en premier plan |
-| `psutil` | Résolution du nom de processus depuis le PID |
-| `screeninfo` | Détection multi-moniteurs (clipping des screenshots) |
+- **Ancrage visuel** (`matchTemplate`) : la cible est re-localisée à partir d'une
+  imagette enregistrée, donc insensible aux déplacements de fenêtre.
+- **Multi-échelle** : tolère la compression RDP / AppliDis et la mise à l'échelle
+  Windows (125 %/150 %).
+- **Adaptateur DPI/RDP** : recalcule un facteur d'échelle quand la résolution de
+  rejeu diffère de l'enregistrement.
+- **Repli + diagnostic** : si l'ancrage échoue, on rejoue sur les coordonnées
+  mises à l'échelle et on archive une capture dans `fallback/`.
 
 ---
 
 ## Licence
 
-MIT — voir [LICENSE](LICENSE)
-
-## Auteur
-
-Olivier Bendries — [@pronoiaque](https://github.com/pronoiaque)
+MIT — voir [LICENSE](LICENSE).
