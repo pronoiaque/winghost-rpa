@@ -1,17 +1,19 @@
-name: Build Windows x64 (winmonitor.exe)
+name: Build Windows x64 (binaire léger)
 
-# Produit l'exécutable mono-fichier de la CLI WinGhost Monitor via PyInstaller.
-#   • à chaque push sur main ou redesign/** (artefact téléchargeable)
+# Produit un binaire unique WinGhost.exe (x64) via PyInstaller.
+#   • AUTOMATIQUEMENT à chaque push sur main (artefact téléchargeable)
 #   • à la demande (workflow_dispatch)
 #   • à chaque tag v* → publication d'une Release avec l'exe attaché
 #
-# OpenCV est EMBARQUÉ (ancrage visuel obligatoire). PyInstaller ne cross-compile
-# pas → ce job DOIT tourner sur windows-latest.
+# Build LÉGER : EasyOCR / PyTorch ne sont PAS embarqués (cf. winghost.spec).
+# PyInstaller ne cross-compile pas → ce job DOIT tourner sur windows-latest.
 
 on:
   push:
-    branches: [main, "redesign/**"]
-    tags: ["v*"]
+    branches:
+      - main
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -40,41 +42,27 @@ jobs:
         run: python tools/check_version.py
 
       - name: Build single-file binary
-        run: pyinstaller --noconfirm --clean winghost-monitor.spec
+        run: pyinstaller --noconfirm --clean winghost.spec
 
-      - name: Smoke test (la CLI démarre et affiche sa version)
+      - name: Smoke test (le binaire démarre / --version sans planter)
         shell: pwsh
         run: |
-          if (-Not (Test-Path dist/winmonitor.exe)) {
-            Write-Error "dist/winmonitor.exe introuvable"; exit 1
+          if (-Not (Test-Path dist/WinGhost.exe)) {
+            Write-Error "dist/WinGhost.exe introuvable"; exit 1
           }
-          $size = (Get-Item dist/winmonitor.exe).Length / 1MB
+          $size = (Get-Item dist/WinGhost.exe).Length / 1MB
           Write-Host ("Binaire produit : {0:N1} Mo" -f $size)
-          ./dist/winmonitor.exe --version
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: winmonitor-windows-x64
-          path: dist/winmonitor.exe
+          name: WinGhost-windows-x64
+          path: dist/WinGhost.exe
           if-no-files-found: error
 
-      - name: Lire la version (version.py)
-        id: ver
-        shell: pwsh
-        run: |
-          $v = (Select-String -Path version.py -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Version détectée : $v"
-
-      # Release publiée sur tag v* OU à la demande (workflow_dispatch) : dans ce
-      # dernier cas, l'action crée le tag vX.Y.Z (lu dans version.py) côté serveur.
-      - name: Publish to Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+      - name: Publish to Release (sur tag uniquement)
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.ver.outputs.version }}
-          name: WinGhost Monitor v${{ steps.ver.outputs.version }}
-          generate_release_notes: true
-          files: dist/winmonitor.exe
+          files: dist/WinGhost.exe
           fail_on_unmatched_files: true
